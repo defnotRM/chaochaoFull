@@ -1,0 +1,44 @@
+# ==============================================================================
+# ChaoChao Fullstack Docker Compose (Next.js + Supabase)
+# ==============================================================================
+# Usage:
+#   Start all:   docker compose up -d --build
+#   Stop all:    docker compose down
+#   View logs:   docker compose logs -f chaochao
+# ==============================================================================
+
+name: chaochao-stack
+
+include:
+  - path: ./supabase-project/docker-compose.yml
+    env_file: ./supabase-project/.env
+
+services:
+  chaochao:
+    container_name: chaochao-app
+    build:
+      context: ./chaochao
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-${ANON_KEY}}
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:3000"
+    env_file:
+      - ./supabase-project/.env
+    environment:
+      - NODE_ENV=production
+      - SUPABASE_URL=http://kong:8000
+      - SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY:-${ANON_KEY}}
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-${ANON_KEY}}
+    depends_on:
+      kong:
+        condition: service_healthy
+    networks:
+      - default
+
+networks:
+  default:
+    name: chaochao-network

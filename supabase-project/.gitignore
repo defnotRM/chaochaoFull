@@ -1,0 +1,24 @@
+# ==============================================================================
+# Supabase Project .gitignore
+# ==============================================================================
+
+# Database & Storage raw binary clusters (DO NOT COMMIT)
+volumes/db/data/
+volumes/db/data/**
+volumes/storage/
+volumes/storage/**
+/volumes/db/data/
+/volumes/storage/
+
+# Secret Environment Files
+.env
+*.env.old
+*.old
+
+# OS & Log Files
+.DS_Store
+Thumbs.db
+*.log
+test.http
+docker-compose.override.yml
+.supabase-version
