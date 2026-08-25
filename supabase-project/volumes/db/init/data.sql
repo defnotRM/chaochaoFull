@@ -3036,3 +3036,16 @@ INSERT INTO auth.identities (
   'email', NOW(), NOW(), NOW(), '25001b57-397c-4be7-b389-ddf7690f318e'
 )
 ON CONFLICT (provider, provider_id) DO NOTHING;
+
+
+-- ==============================================================================
+-- Schema public Permissions
+-- ==============================================================================
+GRANT ALL ON SCHEMA public TO postgres, supabase_admin, service_role, authenticated, anon;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, supabase_admin, service_role, authenticated, anon;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, supabase_admin, service_role, authenticated, anon;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO postgres, supabase_admin, service_role, authenticated, anon;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO postgres, supabase_admin, service_role, authenticated, anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres, supabase_admin, service_role, authenticated, anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO postgres, supabase_admin, service_role, authenticated, anon;
