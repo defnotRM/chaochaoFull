@@ -48,9 +48,9 @@ export async function GET(
     const roleTypeMap = new Map<string, string>();
     (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
 
-    const roles = (roleAssignments || [])
+    const roles: string[] = (roleAssignments || [])
       .map((ra: any) => roleTypeMap.get(ra.role_id))
-      .filter(Boolean);
+      .filter((r): r is string => Boolean(r));
 
     const isLender = roles.includes("lender");
     const isRenter = roles.includes("renter");

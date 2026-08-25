@@ -37,9 +37,9 @@ export async function GET() {
     const roleTypeMap = new Map<string, string>();
     (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
 
-    const roles = (userRoles || [])
+    const roles: string[] = (userRoles || [])
       .map((r: any) => roleTypeMap.get(r.role_id))
-      .filter(Boolean);
+      .filter((r): r is string => Boolean(r));
 
     const cookieStore = await cookies();
     const activeRoleCookie = cookieStore.get("chaochao_active_role")?.value;
