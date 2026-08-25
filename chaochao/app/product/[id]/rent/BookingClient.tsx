@@ -154,10 +154,10 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
   const [startKey, setStartKey] = useState<string | null>(null);
   const [endKey, setEndKey] = useState<string | null>(null);
   const [pickupId, setPickupId] = useState<string | null>(
-    locations.length === 1 ? locations[0].id : null
+    locations.length > 0 ? locations[0].id : "default"
   );
   const [returnId, setReturnId] = useState<string | null>(
-    locations.length === 1 ? locations[0].id : null
+    locations.length > 0 ? locations[0].id : "default"
   );
   const [draft, setDraft] = useState<BookingDraft | null>(null);
 
@@ -269,7 +269,12 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
     !roles.includes("renter") &&
     !roles.includes("admin");
 
-  const canContinue = Boolean(startKey && endKey && pickupId && returnId && !isLenderOnly);
+  const canContinue = Boolean(
+    startKey &&
+    endKey &&
+    (locations.length === 0 || (pickupId && returnId)) &&
+    !isLenderOnly
+  );
 
   async function handleSubmitBooking() {
     if (!canContinue || !startKey || !endKey) return;
