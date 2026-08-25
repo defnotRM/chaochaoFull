@@ -28,6 +28,8 @@ export async function GET(request: Request) {
     let allUsers = [...(dbUsers || [])];
     const existingIds = new Set(allUsers.map((u) => u.user_id));
 
+    const authRoleMap = new Map<string, string[]>();
+
     // 2. Fetch all registered auth users to guarantee no newly registered user is missed
     try {
       const { data: authData } = await admin.auth.admin.listUsers({
@@ -37,6 +39,20 @@ export async function GET(request: Request) {
 
       if (authData?.users && authData.users.length > 0) {
         for (const au of authData.users) {
+          const uRole =
+            au.user_metadata?.signup_role ||
+            au.user_metadata?.role ||
+            "renter";
+          const rolesToAssign =
+            uRole === "both"
+              ? ["renter", "lender"]
+              : uRole === "admin"
+              ? ["admin"]
+              : uRole === "lender"
+              ? ["lender"]
+              : ["renter"];
+          authRoleMap.set(au.id, rolesToAssign);
+
           const uName =
             au.user_metadata?.username ||
             au.email?.split("@")[0] ||
@@ -71,26 +87,6 @@ export async function GET(request: Request) {
                   },
                   { onConflict: "user_id" }
                 );
-
-              const uRole =
-                au.user_metadata?.signup_role ||
-                au.user_metadata?.role ||
-                "renter";
-              const rolesToAssign =
-                uRole === "both" ? ["renter", "lender"] : [uRole];
-              const { data: roleRows } = await admin
-                .from("role")
-                .select("role_id, role_type")
-                .in("role_type", rolesToAssign);
-
-              if (roleRows && roleRows.length > 0) {
-                for (const r of roleRows) {
-                  await admin.from("user_role_assignment").upsert(
-                    { user_id: au.id, role_id: r.role_id },
-                    { onConflict: "user_id,role_id" }
-                  );
-                }
-              }
             } catch {
               // ignore sync errors
             }
@@ -116,18 +112,24 @@ export async function GET(request: Request) {
 
     const userIds = allUsers.map((u) => u.user_id);
 
-    // 3. Fetch roles for these users with Zero-Join Pattern for 100% database accuracy
-    const [{ data: roleAssignments }, { data: allRoles }] = await Promise.all([
+    // 3. Fetch roles from DB and item ownership
+    const [{ data: roleAssignments }, { data: allRoles }, { data: allItems }] = await Promise.all([
       admin
         .from("user_role_assignment")
         .select("user_id, role_id")
         .in("user_id", userIds),
       admin.from("role").select("role_id, role_type"),
+      admin
+        .from("item")
+        .select("user_id, status")
+        .in("user_id", userIds),
     ]);
 
     const roleTypeById = new Map<string, string>();
+    const roleIdByType = new Map<string, string>();
     (allRoles || []).forEach((r) => {
       roleTypeById.set(r.role_id, r.role_type);
+      roleIdByType.set(r.role_type, r.role_id);
     });
 
     const rolesMap = new Map<string, string[]>();
@@ -142,17 +144,62 @@ export async function GET(request: Request) {
       }
     });
 
-    // 3. Count active rental items for each user
-    const { data: itemCounts } = await admin
-      .from("item")
-      .select("user_id")
-      .in("user_id", userIds)
-      .eq("status", "available");
-
+    // Count items and identify users who have listed items (definite lenders)
     const itemCountMap = new Map<string, number>();
-    (itemCounts || []).forEach((it) => {
-      itemCountMap.set(it.user_id, (itemCountMap.get(it.user_id) || 0) + 1);
+    const lenderUserIdsFromItems = new Set<string>();
+    (allItems || []).forEach((it) => {
+      if (it.status === "available") {
+        itemCountMap.set(it.user_id, (itemCountMap.get(it.user_id) || 0) + 1);
+      }
+      lenderUserIdsFromItems.add(it.user_id);
     });
+
+    // Reconcile and auto-sync roles for all users
+    for (const u of allUsers) {
+      let userRoles = rolesMap.get(u.user_id) || [];
+
+      // If user has no roles in DB, use Auth metadata
+      if (userRoles.length === 0 && authRoleMap.has(u.user_id)) {
+        userRoles = [...(authRoleMap.get(u.user_id) || [])];
+      }
+
+      // If Auth metadata has lender or admin, include it
+      const fromAuth = authRoleMap.get(u.user_id) || [];
+      if (fromAuth.includes("lender") && !userRoles.includes("lender")) {
+        userRoles.push("lender");
+      }
+      if (fromAuth.includes("admin") && !userRoles.includes("admin")) {
+        userRoles.push("admin");
+      }
+
+      // If user has listed items in item table, they are definitely a lender
+      if (lenderUserIdsFromItems.has(u.user_id) && !userRoles.includes("lender")) {
+        userRoles.push("lender");
+      }
+
+      if (userRoles.length === 0) {
+        userRoles = ["renter"];
+      }
+
+      rolesMap.set(u.user_id, userRoles);
+
+      // Auto-sync missing role assignments into DB in background
+      for (const rType of userRoles) {
+        const rId = roleIdByType.get(rType);
+        if (rId) {
+          try {
+            await admin
+              .from("user_role_assignment")
+              .upsert(
+                { user_id: u.user_id, role_id: rId },
+                { onConflict: "user_id,role_id" }
+              );
+          } catch {
+            // ignore background sync error
+          }
+        }
+      }
+    }
 
     // 4. Format & Filter by role
     let formattedUsers = allUsers.map((u) => {
