@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     // 3. Resolve user roles from user_role_assignment
     const { data: userRoles, error: roleError } = await admin
       .from("user_role_assignment")
-      .select("role:role_id ( role_type )")
+      .select("role ( role_type )")
       .eq("user_id", profile.user_id);
 
     if (roleError) {

@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     if (user) {
       const { data: userRoles } = await admin
         .from("user_role_assignment")
-        .select("role:role_id ( role_type )")
+        .select("role ( role_type )")
         .eq("user_id", user.id);
 
       const roles = (userRoles || [])

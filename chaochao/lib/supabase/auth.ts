@@ -38,7 +38,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
 
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
-      .select("role:role_id ( role_type )")
+      .select("role ( role_type )")
       .eq("user_id", user.id);
 
     const roles: UserRole[] = (roleAssignments || [])

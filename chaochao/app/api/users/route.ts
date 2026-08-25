@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     // 2. Fetch roles for these users
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
-      .select("user_id, role:role_id ( role_type )")
+      .select("user_id, role ( role_type )")
       .in("user_id", userIds);
 
     const rolesMap = new Map<string, string[]>();
