@@ -62,8 +62,43 @@ export default async function LenderOrderDetailPage({
     imageRes.data?.[0]?.image_url ??
     null;
 
-  const renter = renterRes.data;
-  const renterFullName = renter?.username || "ผู้เช่า";
+  let renter = renterRes.data;
+  if (!renter || !renter.username) {
+    try {
+      const { data: authUser } = await admin.auth.admin.getUserById(order.user_id);
+      if (authUser?.user) {
+        const u = authUser.user;
+        const uName = u.user_metadata?.username || u.email?.split("@")[0] || "ผู้เช่า";
+        const uEmail = u.email || `${uName.toLowerCase()}@chaochao.local`;
+        const uNatId = u.user_metadata?.national_id || null;
+
+        await admin.from("useraccount").upsert(
+          {
+            user_id: u.id,
+            username: uName,
+            email: uEmail,
+            national_id: uNatId,
+            status: "Active",
+          },
+          { onConflict: "user_id" }
+        );
+
+        renter = {
+          user_id: u.id,
+          username: uName,
+          firstname: null,
+          lastname: null,
+          email: uEmail,
+          avatar_url: u.user_metadata?.avatar_url || null,
+          updated_at: new Date().toISOString(),
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const renterFullName = renter?.username || `${renter?.firstname || ""} ${renter?.lastname || ""}`.trim() || "ผู้เช่า";
 
   const renterPhones = (phoneRes.data || [])
     .map((p: any) => p.phone)
