@@ -293,8 +293,8 @@ export async function getProductById(id: string): Promise<Product | null> {
   ).map((r, index) => {
     const renter = r.order?.renter;
     const reviewerName =
-      [renter?.firstname, renter?.lastname].filter(Boolean).join(" ").trim() ||
       renter?.username ||
+      [renter?.firstname, renter?.lastname].filter(Boolean).join(" ").trim() ||
       "ผู้เช่า";
     return {
       id: `${id}-review-${index}`,
@@ -326,18 +326,49 @@ export async function getProductById(id: string): Promise<Product | null> {
         : 0;
   }
 
-  const owner = ownerRes.data;
+  let owner = ownerRes.data;
+  if (!owner || !owner.username) {
+    try {
+      const { data: authUser } = await admin.auth.admin.getUserById(it.user_id);
+      if (authUser?.user) {
+        const u = authUser.user;
+        const uName = u.user_metadata?.username || u.email?.split("@")[0] || "ผู้ให้เช่า";
+        const uEmail = u.email || `${uName.toLowerCase()}@chaochao.local`;
+        const uNatId = u.user_metadata?.national_id || null;
+
+        await admin.from("useraccount").upsert(
+          {
+            user_id: u.id,
+            username: uName,
+            email: uEmail,
+            national_id: uNatId,
+            status: "Active",
+          },
+          { onConflict: "user_id" }
+        );
+
+        owner = {
+          user_id: u.id,
+          username: uName,
+          firstname: null,
+          lastname: null,
+          avatar_url: u.user_metadata?.avatar_url || null,
+          updated_at: new Date().toISOString(),
+          status: "Active",
+          created_at: u.created_at,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const ownerName =
-    [owner?.firstname, owner?.lastname].filter(Boolean).join(" ").trim() ||
     owner?.username ||
+    [owner?.firstname, owner?.lastname].filter(Boolean).join(" ").trim() ||
     "ผู้ให้เช่า";
 
-  const v = owner?.updated_at
-    ? new Date(owner.updated_at).getTime()
-    : Date.now();
-  const avatarUrl = owner?.avatar_url
-    ? `/api/avatar?id=${owner.user_id}&v=${v}`
-    : null;
+  const avatarUrl = owner?.avatar_url || null;
 
   return {
     id: it.item_id,
