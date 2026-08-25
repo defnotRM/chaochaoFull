@@ -24,11 +24,18 @@ export default async function UserDashboardPage({
 
   const { data: userRoles } = await admin
     .from("user_role_assignment")
-    .select("role:role_id ( role_type )")
+    .select("role_id")
     .eq("user_id", id);
 
+  const { data: allRoles } = await admin
+    .from("role")
+    .select("role_id, role_type");
+
+  const roleTypeMap = new Map<string, string>();
+  (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
+
   const roles = (userRoles || [])
-    .map((r: any) => r.role?.role_type)
+    .map((r: any) => roleTypeMap.get(r.role_id))
     .filter(Boolean);
 
   const primaryRole = roles.includes("admin")
