@@ -48,7 +48,10 @@ export async function GET(request: Request) {
     const rolesMap = new Map<string, string[]>();
     (roleAssignments || []).forEach((ra: any) => {
       const current = rolesMap.get(ra.user_id) || [];
-      if (ra.role?.role_type) current.push(ra.role.role_type);
+      const roleType = Array.isArray(ra.role)
+        ? ra.role[0]?.role_type
+        : ra.role?.role_type;
+      if (roleType) current.push(roleType);
       rolesMap.set(ra.user_id, current);
     });
 
