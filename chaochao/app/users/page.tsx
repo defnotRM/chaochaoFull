@@ -39,10 +39,14 @@ function UsersContent() {
       const params = new URLSearchParams();
       if (query.trim()) params.set("q", query.trim());
       if (role !== "all") params.set("role", role);
+      params.set("_t", Date.now().toString());
 
       const res = await fetch(`/api/users?${params.toString()}`, {
         cache: "no-store",
-        headers: { Pragma: "no-cache" },
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+        },
       });
       if (res.ok) {
         const data = await res.json();
