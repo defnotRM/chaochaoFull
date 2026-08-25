@@ -448,6 +448,21 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                           ))}
                         </div>
                       )}
+                      {bookedRanges.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {bookedRanges.map((b, idx) => (
+                            <span
+                              key={`booked-${idx}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700"
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                              <span>
+                                มีคนจองแล้ว: {formatKey(b.start)} – {formatKey(b.end)}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500">{item.name}</p>
                   </div>
@@ -533,6 +548,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                           ? " นอกช่วงเปิดจอง"
                           : ""
                       }`}
+                      title={
+                        booked
+                          ? `วันที่ ${formatKey(key)} ถูกจองแล้ว`
+                          : !open
+                          ? `วันที่ ${formatKey(key)} อยู่นอกช่วงที่เปิดให้เช่า`
+                          : `วันที่ ${formatKey(key)} ว่าง (สามารถเลือกได้)`
+                      }
                       className={`flex aspect-square items-center justify-center rounded-lg text-sm transition ${cls} ${
                         selectable ? "cursor-pointer" : "cursor-not-allowed"
                       }`}
