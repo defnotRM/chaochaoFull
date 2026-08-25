@@ -116,17 +116,30 @@ export async function GET(request: Request) {
 
     const userIds = allUsers.map((u) => u.user_id);
 
-    // 3. Fetch roles for these users
-    const { data: roleAssignments } = await admin
-      .from("user_role_assignment")
-      .select("user_id, role ( role_type )")
-      .in("user_id", userIds);
+    // 3. Fetch roles for these users with Zero-Join Pattern for 100% database accuracy
+    const [{ data: roleAssignments }, { data: allRoles }] = await Promise.all([
+      admin
+        .from("user_role_assignment")
+        .select("user_id, role_id")
+        .in("user_id", userIds),
+      admin.from("role").select("role_id, role_type"),
+    ]);
+
+    const roleTypeById = new Map<string, string>();
+    (allRoles || []).forEach((r) => {
+      roleTypeById.set(r.role_id, r.role_type);
+    });
 
     const rolesMap = new Map<string, string[]>();
     (roleAssignments || []).forEach((ra: any) => {
-      const current = rolesMap.get(ra.user_id) || [];
-      if (ra.role?.role_type) current.push(ra.role.role_type);
-      rolesMap.set(ra.user_id, current);
+      const type = roleTypeById.get(ra.role_id);
+      if (type) {
+        const current = rolesMap.get(ra.user_id) || [];
+        if (!current.includes(type)) {
+          current.push(type);
+        }
+        rolesMap.set(ra.user_id, current);
+      }
     });
 
     // 3. Count active rental items for each user

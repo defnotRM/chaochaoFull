@@ -253,7 +253,17 @@ function UsersContent() {
                           )}
                         </div>
 
-                        <span className="rounded-full bg-[#c0e6fd]/30 px-3 py-1 text-xs font-semibold text-[#1b3554]">
+                        <span
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold shadow-2xs ${
+                            u.primaryRole === "admin"
+                              ? "border-purple-200 bg-purple-100 text-purple-800"
+                              : u.primaryRole === "lender"
+                              ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                              : u.primaryRole === "both"
+                              ? "border-indigo-200 bg-indigo-100 text-indigo-800"
+                              : "border-[#80aad3]/40 bg-[#c0e6fd]/50 text-[#1b3554]"
+                          }`}
+                        >
                           {u.role}
                         </span>
                       </div>
