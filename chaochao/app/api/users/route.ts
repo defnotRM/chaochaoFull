@@ -11,71 +11,7 @@ export async function GET(request: Request) {
 
     const admin = createAdminClient();
 
-    // 0. Auto-sync any auth users missing from useraccount
-    try {
-      const { data: authUsers } = await admin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-      });
-
-      if (authUsers?.users && authUsers.users.length > 0) {
-        for (const au of authUsers.users) {
-          try {
-            const uName =
-              au.user_metadata?.username ||
-              au.email?.split("@")[0] ||
-              "ผู้ใช้งาน";
-            const uEmail = au.email || `${uName}@chaochao.local`;
-            const uNatId = au.user_metadata?.national_id || null;
-
-            const { data: existing } = await admin
-              .from("useraccount")
-              .select("user_id")
-              .eq("user_id", au.id)
-              .maybeSingle();
-
-            if (!existing) {
-              await admin.from("useraccount").upsert(
-                {
-                  user_id: au.id,
-                  username: uName,
-                  email: uEmail,
-                  national_id: uNatId,
-                  status: "Active",
-                },
-                { onConflict: "user_id" }
-              );
-            }
-
-            const uRole =
-              au.user_metadata?.signup_role ||
-              au.user_metadata?.role ||
-              "renter";
-            const rolesToAssign =
-              uRole === "both" ? ["renter", "lender"] : [uRole];
-            const { data: roleRows } = await admin
-              .from("role")
-              .select("role_id, role_type")
-              .in("role_type", rolesToAssign);
-
-            if (roleRows && roleRows.length > 0) {
-              for (const r of roleRows) {
-                await admin.from("user_role_assignment").upsert(
-                  { user_id: au.id, role_id: r.role_id },
-                  { onConflict: "user_id,role_id" }
-                );
-              }
-            }
-          } catch (innerErr) {
-            console.error("User sync individual error:", au.id, innerErr);
-          }
-        }
-      }
-    } catch (listErr) {
-      console.error("Auto-sync listUsers error:", listErr);
-    }
-
-    // 1. Fetch active users (include all non-suspended users)
+    // 1. Fetch users from useraccount
     let query = admin
       .from("useraccount")
       .select("user_id, username, bio, avatar_url, banner_url, status, updated_at, created_at")
@@ -83,27 +19,104 @@ export async function GET(request: Request) {
       .neq("status", "Banned")
       .order("created_at", { ascending: false });
 
-    if (q) {
-      query = query.or(`username.ilike.%${q}%,bio.ilike.%${q}%`);
-    }
-
-    const { data: users, error: usersError } = await query;
+    const { data: dbUsers, error: usersError } = await query;
 
     if (usersError) {
-      console.error("Error fetching users:", usersError);
-      return NextResponse.json(
-        { message: "เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ใช้งาน" },
-        { status: 500 }
+      console.error("Error fetching db users:", usersError);
+    }
+
+    let allUsers = [...(dbUsers || [])];
+    const existingIds = new Set(allUsers.map((u) => u.user_id));
+
+    // 2. Fetch all registered auth users to guarantee no newly registered user is missed
+    try {
+      const { data: authData } = await admin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+
+      if (authData?.users && authData.users.length > 0) {
+        for (const au of authData.users) {
+          const uName =
+            au.user_metadata?.username ||
+            au.email?.split("@")[0] ||
+            "ผู้ใช้งาน";
+          const uEmail = au.email || `${uName.toLowerCase()}@chaochao.local`;
+          const uNatId = au.user_metadata?.national_id || null;
+
+          if (!existingIds.has(au.id)) {
+            allUsers.unshift({
+              user_id: au.id,
+              username: uName,
+              bio: "",
+              avatar_url: au.user_metadata?.avatar_url || null,
+              banner_url: null,
+              status: "Active",
+              updated_at: au.updated_at || new Date().toISOString(),
+              created_at: au.created_at || new Date().toISOString(),
+            });
+            existingIds.add(au.id);
+
+            // Auto-sync into useraccount in the background
+            try {
+              await admin
+                .from("useraccount")
+                .upsert(
+                  {
+                    user_id: au.id,
+                    username: uName,
+                    email: uEmail,
+                    national_id: uNatId,
+                    status: "Active",
+                  },
+                  { onConflict: "user_id" }
+                );
+
+              const uRole =
+                au.user_metadata?.signup_role ||
+                au.user_metadata?.role ||
+                "renter";
+              const rolesToAssign =
+                uRole === "both" ? ["renter", "lender"] : [uRole];
+              const { data: roleRows } = await admin
+                .from("role")
+                .select("role_id, role_type")
+                .in("role_type", rolesToAssign);
+
+              if (roleRows && roleRows.length > 0) {
+                for (const r of roleRows) {
+                  await admin.from("user_role_assignment").upsert(
+                    { user_id: au.id, role_id: r.role_id },
+                    { onConflict: "user_id,role_id" }
+                  );
+                }
+              }
+            } catch {
+              // ignore sync errors
+            }
+          }
+        }
+      }
+    } catch (listErr) {
+      console.error("Auto-sync auth users error:", listErr);
+    }
+
+    if (q) {
+      const qLower = q.toLowerCase();
+      allUsers = allUsers.filter(
+        (u) =>
+          u.username?.toLowerCase().includes(qLower) ||
+          u.bio?.toLowerCase().includes(qLower)
       );
     }
 
-    if (!users || users.length === 0) {
+    if (!allUsers || allUsers.length === 0) {
       return NextResponse.json({ users: [] });
     }
 
-    const userIds = users.map((u) => u.user_id);
+    const userIds = allUsers.map((u) => u.user_id);
 
-    // 2. Fetch roles for these users
+    // 3. Fetch roles for these users
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
       .select("user_id, role ( role_type )")
@@ -129,7 +142,7 @@ export async function GET(request: Request) {
     });
 
     // 4. Format & Filter by role
-    let formattedUsers = users.map((u) => {
+    let formattedUsers = allUsers.map((u) => {
       const roles = rolesMap.get(u.user_id) || [];
       const isLender = roles.includes("lender");
       const isRenter = roles.includes("renter");
