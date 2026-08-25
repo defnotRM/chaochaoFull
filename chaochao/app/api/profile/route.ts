@@ -54,7 +54,7 @@ export async function GET() {
 
     const admin = createAdminClient();
 
-    const [profileRes, rolesRes, phonesRes] = await Promise.all([
+    const [profileRes, roleAssignmentsRes, allRolesRes, phonesRes] = await Promise.all([
       admin
         .from("useraccount")
         .select(
@@ -64,8 +64,9 @@ export async function GET() {
         .maybeSingle(),
       admin
         .from("user_role_assignment")
-        .select("role ( role_type )")
+        .select("role_id")
         .eq("user_id", user.id),
+      admin.from("role").select("role_id, role_type"),
       admin
         .from("userphones")
         .select("phone")
@@ -75,7 +76,7 @@ export async function GET() {
     let profile = profileRes.data;
     if (!profile) {
       const uName = user.user_metadata?.username || user.email?.split("@")[0] || "ผู้ใช้งาน";
-      const uEmail = user.email || `${uName}@chaochao.local`;
+      const uEmail = user.email || `${uName.toLowerCase()}@chaochao.local`;
       const uNatId = user.user_metadata?.national_id || null;
 
       await admin.from("useraccount").upsert(
@@ -88,22 +89,6 @@ export async function GET() {
         },
         { onConflict: "user_id" }
       );
-
-      const uRole = user.user_metadata?.signup_role || user.user_metadata?.role || "renter";
-      const rolesToAssign = uRole === "both" ? ["renter", "lender"] : [uRole];
-      const { data: roleRows } = await admin
-        .from("role")
-        .select("role_id, role_type")
-        .in("role_type", rolesToAssign);
-
-      if (roleRows && roleRows.length > 0) {
-        for (const r of roleRows) {
-          await admin.from("user_role_assignment").upsert(
-            { user_id: user.id, role_id: r.role_id },
-            { onConflict: "user_id,role_id" }
-          );
-        }
-      }
 
       profile = {
         user_id: user.id,
@@ -119,9 +104,14 @@ export async function GET() {
       };
     }
 
-    let roles = (rolesRes.data || [])
-      .map((item: any) => item.role?.role_type)
-      .filter(Boolean);
+    const roleTypeById = new Map<string, string>();
+    (allRolesRes.data || []).forEach((r) => {
+      roleTypeById.set(r.role_id, r.role_type);
+    });
+
+    let roles = (roleAssignmentsRes.data || [])
+      .map((ra: any) => roleTypeById.get(ra.role_id))
+      .filter((r): r is string => Boolean(r));
 
     if (roles.length === 0) {
       const uRole = user.user_metadata?.signup_role || user.user_metadata?.role || "renter";

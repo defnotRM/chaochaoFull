@@ -516,17 +516,29 @@ export default function ProfilePage() {
                     </h1>
                     
                     {/* Role Badges */}
-                    {roles && roles.length > 0 ? (
-                      roles.map((r) => {
+                    {(() => {
+                      const expandedRoles: string[] = [];
+                      if (roles && roles.length > 0) {
+                        roles.forEach((r) => {
+                          if (r === "both" || r === "ผู้ให้เช่า / ผู้เช่า") {
+                            if (!expandedRoles.includes("lender")) expandedRoles.push("lender");
+                            if (!expandedRoles.includes("renter")) expandedRoles.push("renter");
+                          } else if (!expandedRoles.includes(r)) {
+                            expandedRoles.push(r);
+                          }
+                        });
+                      }
+                      if (expandedRoles.length === 0) {
+                        expandedRoles.push("renter");
+                      }
+
+                      return expandedRoles.map((r) => {
                         const isLender = r === "lender" || r === "ผู้ให้เช่า";
                         const isRenter = r === "renter" || r === "ผู้เช่า";
                         const isAdmin = r === "admin" || r === "ผู้ดูแลระบบ";
-                        const isBoth = r === "both";
 
                         const label = isAdmin
                           ? "ผู้ดูแลระบบ"
-                          : isBoth
-                          ? "ผู้ให้เช่า / ผู้เช่า"
                           : isLender
                           ? "ผู้ให้เช่า"
                           : isRenter
@@ -537,24 +549,18 @@ export default function ProfilePage() {
                           ? "bg-purple-100 text-purple-800 border-purple-200"
                           : isLender
                           ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                          : isBoth
-                          ? "bg-indigo-100 text-indigo-800 border-indigo-200"
                           : "bg-[#c0e6fd]/50 text-[#1b3554] border-[#80aad3]/40";
 
                         return (
                           <span
                             key={r}
-                            className={`inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-semibold shadow-xs ${colorClass}`}
+                            className={`inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-semibold shadow-2xs ${colorClass}`}
                           >
                             {label}
                           </span>
                         );
-                      })
-                    ) : (
-                      <span className="inline-flex items-center rounded-full border border-[#80aad3]/40 bg-[#c0e6fd]/50 px-3 py-0.5 text-xs font-semibold text-[#1b3554]">
-                        ผู้เช่า
-                      </span>
-                    )}
+                      });
+                    })()}
                   </div>
 
                   <p className="mt-1 text-xs text-slate-500">
