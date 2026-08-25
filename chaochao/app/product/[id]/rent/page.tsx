@@ -8,12 +8,14 @@ import type { BookingLocation, BookingPageData, DateRange } from "./types";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// สถานะออเดอร์ที่ยัง "กันคิว" อยู่ (ตรงกับ exclusion constraint no_overlapping_active_bookings)
+// สถานะออเดอร์ที่ "กันคิว" (ล็อควันเฉพาะหลังจากผู้ให้เช่ากดอนุมัติแล้ว/กำลังชำระเงิน/ชำระเงินแล้ว)
 const ACTIVE_ORDER_STATUSES = [
-  "requested",
   "awaiting_payment",
   "paid",
   "item_sent",
+  "item_received",
+  "item_returned",
+  "awaiting_additional_payment",
 ];
 
 function formatFullAddress(location: {

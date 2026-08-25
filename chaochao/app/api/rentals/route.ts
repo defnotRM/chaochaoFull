@@ -124,18 +124,18 @@ export async function POST(request: Request) {
       }
     }
 
-    // 2.2) ตรวจสอบการจองซ้ำซ้อนกับ Order อื่นที่ยังใช้งานอยู่
+    // 2.2) ตรวจสอบการจองซ้ำซ้อนกับ Order อื่นที่ได้รับการอนุมัติแล้ว
     const { data: overlappingOrders } = await admin
       .from("rentalorder")
       .select("order_id, start_date, end_date")
       .eq("item_id", itemId)
-      .in("status", ["requested", "awaiting_payment", "paid", "item_sent"])
+      .in("status", ["awaiting_payment", "paid", "item_sent", "item_received"])
       .lte("start_date", endDate)
       .gte("end_date", startDate);
 
     if (overlappingOrders && overlappingOrders.length > 0) {
       return NextResponse.json(
-        { message: "ช่วงเวลาดังกล่าวถูกจองไปแล้ว กรุณาเลือกช่วงเวลาอื่น" },
+        { message: "ช่วงเวลาดังกล่าวมีรายการเช่าที่ได้รับการอนุมัติไปแล้ว กรุณาเลือกช่วงเวลาอื่น" },
         { status: 409 }
       );
     }

@@ -87,6 +87,30 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     );
   }
 
+  // ถ้าผู้ให้เช่ากดยอมรับ/อนุมัติ (awaiting_payment) ตรวจสอบว่าไม่มีออเดอร์อื่นที่อนุมัติซ้อนวันกัน
+  if (status === "awaiting_payment") {
+    const { data: fullOrder } = await admin
+      .from("rentalorder")
+      .select("start_date, end_date, item_id")
+      .eq("order_id", id)
+      .single();
+
+    if (fullOrder) {
+      const { data: overlapping } = await admin
+        .from("rentalorder")
+        .select("order_id")
+        .eq("item_id", fullOrder.item_id)
+        .neq("order_id", id)
+        .in("status", ["awaiting_payment", "paid", "item_sent", "item_received"])
+        .lte("start_date", fullOrder.end_date)
+        .gte("end_date", fullOrder.start_date);
+
+      if (overlapping && overlapping.length > 0) {
+        return apiError("ไม่สามารถอนุมัติได้ เนื่องจากช่วงเวลานี้มีรายการเช่าอื่นที่ได้รับการอนุมัติไปแล้ว", 409);
+      }
+    }
+  }
+
   const { data, error } = await admin
     .from("rentalorder")
     .update({ status, updated_at: new Date().toISOString() })
