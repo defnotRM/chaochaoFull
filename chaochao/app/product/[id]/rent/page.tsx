@@ -6,6 +6,7 @@ import type { BookingLocation, BookingPageData, DateRange } from "./types";
 
 // ข้อมูลมาจาก DB ตอน request จริง (มีออเดอร์/คิวว่างที่เปลี่ยนได้) → ไม่ prerender
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // สถานะออเดอร์ที่ยัง "กันคิว" อยู่ (ตรงกับ exclusion constraint no_overlapping_active_bookings)
 const ACTIVE_ORDER_STATUSES = [
@@ -56,11 +57,11 @@ export default async function ProductRentPage({
   }
 
   // 2) เจ้าของ / จุดนัด / คิวว่าง / รูป / ออเดอร์ที่กันคิว — ดึงขนานกัน
-  const [ownerRes, locationsRes, availabilityRes, imageRes, ordersRes, reviewRes] =
+  const [ownerRes, locationsRes, availabilityRes, imageRes, ordersRes, reviewRes, ownerItemsRes] =
     await Promise.all([
       admin
         .from("useraccount")
-        .select("username, firstname, lastname, avatar_url, updated_at, status, created_at")
+        .select("user_id, username, firstname, lastname, avatar_url, updated_at, status, created_at")
         .eq("user_id", item.user_id)
         .maybeSingle(),
       admin
@@ -88,20 +89,53 @@ export default async function ProductRentPage({
         .from("review")
         .select("rating, order:order_id!inner ( item_id )")
         .eq("order.item_id", id),
+      // สินค้าทั้งหมดของผู้ให้เช่าสำหรับ aggregate เรตติ้ง
+      admin.from("item").select("item_id").eq("user_id", item.user_id),
     ]);
 
-  const owner = ownerRes.data;
+  let owner = ownerRes.data;
+  if (!owner || !owner.username) {
+    try {
+      const { data: authUser } = await admin.auth.admin.getUserById(item.user_id);
+      if (authUser?.user) {
+        const u = authUser.user;
+        const uName = u.user_metadata?.username || u.email?.split("@")[0] || "ผู้ให้เช่า";
+        const uEmail = u.email || `${uName.toLowerCase()}@chaochao.local`;
+        const uNatId = u.user_metadata?.national_id || null;
+
+        await admin.from("useraccount").upsert(
+          {
+            user_id: u.id,
+            username: uName,
+            email: uEmail,
+            national_id: uNatId,
+            status: "Active",
+          },
+          { onConflict: "user_id" }
+        );
+
+        owner = {
+          user_id: u.id,
+          username: uName,
+          firstname: null,
+          lastname: null,
+          avatar_url: u.user_metadata?.avatar_url || null,
+          updated_at: new Date().toISOString(),
+          status: "Active",
+          created_at: u.created_at,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const ownerName =
-    [owner?.firstname, owner?.lastname].filter(Boolean).join(" ").trim() ||
     owner?.username ||
+    [owner?.firstname, owner?.lastname].filter(Boolean).join(" ").trim() ||
     "ผู้ให้เช่า";
 
-  const v = owner?.updated_at
-    ? new Date(owner.updated_at).getTime()
-    : Date.now();
-  const avatarUrl = owner?.avatar_url
-    ? `/api/avatar?id=${item.user_id}&v=${v}`
-    : null;
+  const avatarUrl = owner?.avatar_url || null;
 
   const locations: BookingLocation[] = (locationsRes.data || []).map((loc) => ({
     id: loc.location_id,
@@ -124,16 +158,36 @@ export default async function ProductRentPage({
     imageRes.data?.[0]?.image_url ||
     null;
 
+  // เรตติ้งของผู้ให้เช่าจากทุกสินค้า
+  const ownerItemIds = (ownerItemsRes.data || []).map((r) => r.item_id);
+  let ownerRatingData: { average: number; count: number } | null = null;
+  if (ownerItemIds.length > 0) {
+    const { data: ownerReviews } = await admin
+      .from("review")
+      .select("rating, order:order_id!inner ( item_id )")
+      .in("order.item_id", ownerItemIds);
+    const rows = (ownerReviews || []) as Array<{ rating: number }>;
+    if (rows.length > 0) {
+      const sum = rows.reduce((s, r) => s + (Number(r.rating) || 0), 0);
+      ownerRatingData = {
+        average: sum / rows.length,
+        count: rows.length,
+      };
+    }
+  }
+
   const reviews = reviewRes.data || [];
-  const rating =
+  const itemRating =
     reviews.length > 0
       ? {
           average:
-            reviews.reduce((sum, r) => sum + (r.rating || 0), 0) /
+            reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) /
             reviews.length,
           count: reviews.length,
         }
       : null;
+
+  const rating = ownerRatingData || itemRating;
 
   const data: BookingPageData = {
     item: {
@@ -156,5 +210,5 @@ export default async function ProductRentPage({
     rating,
   };
 
-  return <BookingClient data={data} />;
+  return <BookingClient key={item.item_id} data={data} />;
 }

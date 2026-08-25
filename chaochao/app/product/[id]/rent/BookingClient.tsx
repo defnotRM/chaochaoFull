@@ -190,10 +190,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
 
   const [viewMonth, setViewMonth] = useState(initialMonth);
 
-  // ให้ viewMonth อยู่ใน bounds เสมอเมื่อ bounds เปลี่ยน
+  // เมื่อเปิดหน้าหรือ initialMonth / item เปลี่ยน ให้ตั้ง viewMonth เป็น initialMonth ทันที
   useEffect(() => {
-    setViewMonth((current) => Math.max(bounds.min, Math.min(current, bounds.max)));
-  }, [bounds]);
+    setViewMonth(initialMonth);
+    setStartKey(null);
+    setEndKey(null);
+    setDraft(null);
+  }, [initialMonth, item.id]);
 
   const [startKey, setStartKey] = useState<string | null>(null);
   const [endKey, setEndKey] = useState<string | null>(null);
