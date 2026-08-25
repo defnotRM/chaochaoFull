@@ -18,31 +18,37 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
 
     const cleanInput = username.trim();
-    const cleanEmail = cleanInput.includes("@")
-      ? cleanInput.toLowerCase()
-      : `${cleanInput.toLowerCase()}@chaochao.local`;
+    const isEmail = cleanInput.includes("@");
 
-    // 2. Lookup user profile in useraccount by username or email (case-insensitive)
-    let { data: profile, error: profileError } = await admin
+    // 2. Lookup user profile in useraccount (strictly by username if not email)
+    let query = admin
       .from("useraccount")
-      .select("user_id, username, email, status")
-      .or(`username.ilike.${cleanInput},email.ilike.${cleanInput},email.ilike.${cleanEmail}`)
-      .maybeSingle();
+      .select("user_id, username, email, status");
+
+    if (isEmail) {
+      query = query.ilike("email", cleanInput);
+    } else {
+      query = query.ilike("username", cleanInput);
+    }
+
+    let { data: profile } = await query.maybeSingle();
 
     // Fallback: If not found in useraccount table, search Supabase Auth users directly
     if (!profile) {
-      const { data: authUsers } = await admin.auth.admin.listUsers();
-      const matched = authUsers?.users?.find(
-        (u) =>
-          u.email?.toLowerCase() === cleanInput.toLowerCase() ||
-          u.email?.toLowerCase() === cleanEmail.toLowerCase() ||
-          (u.user_metadata?.username &&
-            String(u.user_metadata.username).toLowerCase() === cleanInput.toLowerCase())
-      );
+      const { data: authUsers } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const matched = authUsers?.users?.find((u) => {
+        if (isEmail) {
+          return u.email?.toLowerCase() === cleanInput.toLowerCase();
+        }
+        return (
+          u.user_metadata?.username &&
+          String(u.user_metadata.username).toLowerCase() === cleanInput.toLowerCase()
+        );
+      });
 
       if (matched) {
         const uName = matched.user_metadata?.username || cleanInput;
-        const uEmail = matched.email || cleanEmail;
+        const uEmail = matched.email || `${uName.toLowerCase()}@chaochao.local`;
         const uNatId = matched.user_metadata?.national_id || null;
 
         await admin.from("useraccount").upsert(
@@ -126,17 +132,10 @@ export async function POST(request: Request) {
 
     // 4. Authenticate using Supabase Auth (stores session in cookies via @supabase/ssr)
     const supabase = await createServerClient();
-    let authRes = await supabase.auth.signInWithPassword({
+    const authRes = await supabase.auth.signInWithPassword({
       email: profile.email,
       password,
     });
-
-    if (authRes.error && cleanEmail !== profile.email) {
-      authRes = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      });
-    }
 
     if (authRes.error || !authRes.data.user) {
       console.error("Auth sign-in error:", authRes.error);

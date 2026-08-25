@@ -205,9 +205,12 @@ export async function PATCH(request: Request) {
       );
     }
 
-    // 2. Update useraccount (username & bio & avatar_url & banner_url)
+    const newEmail = `${username.toLowerCase().trim()}@chaochao.local`;
+
+    // 2. Update useraccount (username & email & bio & avatar_url & banner_url)
     const updateData: Record<string, any> = {
       username,
+      email: newEmail,
       bio: bio ?? "",
       updated_at: new Date().toISOString(),
     };
@@ -268,7 +271,7 @@ export async function PATCH(request: Request) {
       updatedPhones = (currentPhones || []).map((p: any) => p.phone).filter(Boolean);
     }
 
-    // 4. Update auth.users metadata (keep avatar_url short)
+    // 4. Update auth.users email and metadata
     const userMetadata = {
       ...(user.user_metadata || {}),
       username,
@@ -280,26 +283,23 @@ export async function PATCH(request: Request) {
           : user.user_metadata?.avatar_url,
     };
 
-    if (password && password.trim().length >= 8) {
-      const { error: passError } = await admin.auth.admin.updateUserById(
-        user.id,
-        {
-          password: password.trim(),
-          user_metadata: userMetadata,
-        }
-      );
+    const authUpdatePayload: any = {
+      email: newEmail,
+      email_confirm: true,
+      user_metadata: userMetadata,
+    };
 
-      if (passError) {
-        console.error("Password update error:", passError);
-        return NextResponse.json(
-          { message: "แก้ไขโปรไฟล์สำเร็จ แต่เกิดข้อผิดพลาดในการเปลี่ยนรหัสผ่าน" },
-          { status: 500 }
-        );
-      }
-    } else {
-      await admin.auth.admin.updateUserById(user.id, {
-        user_metadata: userMetadata,
-      });
+    if (password && password.trim().length >= 8) {
+      authUpdatePayload.password = password.trim();
+    }
+
+    const { error: authUpdateError } = await admin.auth.admin.updateUserById(
+      user.id,
+      authUpdatePayload
+    );
+
+    if (authUpdateError) {
+      console.error("Auth update error:", authUpdateError);
     }
 
     const now = Date.now();
