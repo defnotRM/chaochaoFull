@@ -24,9 +24,18 @@ export async function POST(request: Request) {
       .or(`username.eq.${username},email.eq.${username}`)
       .maybeSingle();
 
-    if (profileError || !profile) {
+    if (profileError) {
+      console.error("Login profile query error:", profileError);
       return NextResponse.json(
-        { message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" },
+        { message: "เกิดข้อผิดพลาดในการค้นหาผู้ใช้: " + profileError.message },
+        { status: 500 }
+      );
+    }
+
+    if (!profile) {
+      console.error("Login user not found for input:", username);
+      return NextResponse.json(
+        { message: "ไม่พบชื่อผู้ใช้หรืออีเมลนี้ในระบบ" },
         { status: 401 }
       );
     }
