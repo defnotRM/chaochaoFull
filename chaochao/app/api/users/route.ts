@@ -51,11 +51,12 @@ export async function GET(request: Request) {
       // ignore sync errors
     }
 
-    // 1. Fetch active users
+    // 1. Fetch active users (include all non-suspended users)
     let query = admin
       .from("useraccount")
       .select("user_id, username, bio, avatar_url, banner_url, status, updated_at, created_at")
-      .eq("status", "Active")
+      .neq("status", "Suspended")
+      .neq("status", "Banned")
       .order("created_at", { ascending: false });
 
     if (q) {
