@@ -145,10 +145,10 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
 
   // ขอบเขตเดือนที่เลื่อนดูได้ = ยึดตามช่วง availability ที่ผู้ให้เช่าเปิดไว้จริง
   const bounds = useMemo(() => {
-    const now = new Date();
-    const currentMonth = monthValue(now.getFullYear(), now.getMonth());
     if (availability.length === 0) {
-      return { min: currentMonth, max: currentMonth + 11 };
+      const now = new Date();
+      const currentMonth = monthValue(now.getFullYear(), now.getMonth());
+      return { min: currentMonth - 6, max: currentMonth + 12 };
     }
     const validStarts = availability
       .map((a) => toDateKey(a.start))
@@ -160,7 +160,9 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
       .map((k) => keyToDate(k));
 
     if (validStarts.length === 0 || validEnds.length === 0) {
-      return { min: currentMonth, max: currentMonth + 11 };
+      const now = new Date();
+      const currentMonth = monthValue(now.getFullYear(), now.getMonth());
+      return { min: currentMonth - 6, max: currentMonth + 12 };
     }
 
     const minDate = new Date(Math.min(...validStarts.map((d) => d.getTime())));
@@ -169,32 +171,28 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
     const startMonth = monthValue(minDate.getFullYear(), minDate.getMonth());
     const endMonth = monthValue(maxDate.getFullYear(), maxDate.getMonth());
 
-    const min = Math.min(currentMonth, startMonth);
-    const max = Math.max(currentMonth + 1, endMonth);
-
-    return { min, max };
+    return { min: startMonth, max: endMonth };
   }, [availability]);
 
-  // หาเดือนแรกที่เริ่มมีวันเปิดให้เช่า (>= วันนี้) เพื่อเปิดปฏิทินให้ตรงกับคิวของผู้ให้เช่าทันที
+  // ตั้งปฏิทินให้เปิดมาที่เดือนแรกของช่วงที่ผู้ให้เช่าเปิดไว้ทันที
   const initialMonth = useMemo(() => {
-    const now = new Date();
-    const currentMonth = monthValue(now.getFullYear(), now.getMonth());
-    if (availability.length === 0) return currentMonth;
-
-    const upcoming = availability
-      .map((a) => ({ s: toDateKey(a.start), e: toDateKey(a.end) }))
-      .filter(({ e }) => e >= todayKey);
-
-    if (upcoming.length > 0) {
-      const firstValidStart = upcoming[0].s;
-      if (firstValidStart) {
-        const targetDateKey = firstValidStart >= todayKey ? firstValidStart : todayKey;
-        const targetDate = keyToDate(targetDateKey);
-        return monthValue(targetDate.getFullYear(), targetDate.getMonth());
-      }
+    if (availability.length === 0) {
+      const now = new Date();
+      return monthValue(now.getFullYear(), now.getMonth());
     }
-    return currentMonth;
-  }, [availability, todayKey]);
+
+    const validStarts = availability
+      .map((a) => toDateKey(a.start))
+      .filter(Boolean);
+
+    if (validStarts.length > 0) {
+      const firstDate = keyToDate(validStarts[0]);
+      return monthValue(firstDate.getFullYear(), firstDate.getMonth());
+    }
+
+    const now = new Date();
+    return monthValue(now.getFullYear(), now.getMonth());
+  }, [availability]);
 
   const [viewMonth, setViewMonth] = useState(initialMonth);
 
@@ -219,10 +217,8 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
   const viewYear = Math.floor(viewMonth / 12);
   const viewMonthIndex = viewMonth % 12;
 
-  const isPast = (key: string) => key < todayKey;
   const isBooked = (key: string) => inRanges(key, bookedRanges);
   const isOpen = (key: string) => {
-    if (isPast(key)) return false;
     if (availability.length === 0) return true;
     return inRanges(key, availability);
   };
