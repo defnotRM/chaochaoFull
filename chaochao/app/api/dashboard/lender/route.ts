@@ -74,10 +74,6 @@ export async function GET(request: NextRequest) {
             avatar_url,
             firstname,
             lastname
-          ),
-          payment:payment (
-            payment_id,
-            status
           )
         `)
         .in("item_id", itemIds)
@@ -86,6 +82,15 @@ export async function GET(request: NextRequest) {
       if (ordersError) {
         console.error("Error fetching incoming orders:", ordersError);
       } else if (orders) {
+        const orderIds = orders.map((o) => o.order_id);
+        const { data: rawPayments } = orderIds.length > 0
+          ? await admin.from("payment").select("order_id, status").in("order_id", orderIds)
+          : { data: [] };
+
+        const pendingPaymentOrderIds = new Set(
+          (rawPayments || []).filter((p) => p.status === "pending").map((p) => p.order_id)
+        );
+
         // Fetch renter phones
         const renterUserIds = orders.map((o) => o.user_id).filter(Boolean);
         const { data: phones } = await admin
@@ -101,9 +106,7 @@ export async function GET(request: NextRequest) {
         });
 
         incomingOrders = orders.map((o: any) => {
-          const hasPendingPayment = Array.isArray(o.payment)
-            ? o.payment.some((p: any) => p.status === "pending")
-            : false;
+          const hasPendingPayment = pendingPaymentOrderIds.has(o.order_id);
 
           return {
             ...o,

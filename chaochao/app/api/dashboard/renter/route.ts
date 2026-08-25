@@ -44,15 +44,7 @@ export async function GET(request: NextRequest) {
           rental_fee_per_day,
           deposit,
           status,
-          user_id,
-          lender:user_id (
-            username,
-            avatar_url
-          )
-        ),
-        payment:payment (
-          payment_id,
-          status
+          user_id
         )
       `)
       .eq("user_id", userId)
@@ -66,12 +58,35 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const orderList = (orders || []).map((o: any) => ({
-      ...o,
-      hasPendingPayment: Array.isArray(o.payment)
-        ? o.payment.some((p: any) => p.status === "pending")
-        : false,
-    }));
+    const orderIds = (orders || []).map((o) => o.order_id);
+    const lenderUserIds = Array.from(
+      new Set((orders || []).map((o: any) => o.item?.user_id).filter(Boolean))
+    );
+
+    const [{ data: lenders }, { data: rawPayments }] = await Promise.all([
+      lenderUserIds.length > 0
+        ? admin.from("useraccount").select("user_id, username, avatar_url").in("user_id", lenderUserIds)
+        : { data: [] },
+      orderIds.length > 0
+        ? admin.from("payment").select("order_id, status").in("order_id", orderIds)
+        : { data: [] },
+    ]);
+
+    const lenderMap = new Map<string, any>(
+      (lenders || []).map((l) => [l.user_id, l])
+    );
+    const pendingPaymentOrderIds = new Set(
+      (rawPayments || []).filter((p) => p.status === "pending").map((p) => p.order_id)
+    );
+
+    const orderList = (orders || []).map((o: any) => {
+      const lender = o.item?.user_id ? lenderMap.get(o.item.user_id) : null;
+      return {
+        ...o,
+        item: o.item ? { ...o.item, lender } : null,
+        hasPendingPayment: pendingPaymentOrderIds.has(o.order_id),
+      };
+    });
 
     // 2. คำนวณสรุปสถิติ
     const activeStatuses = [
