@@ -63,14 +63,27 @@ export async function GET() {
       };
     }
 
-    const { data: userRoles } = await admin
-      .from("user_role_assignment")
-      .select("role ( role_type )")
-      .eq("user_id", user.id);
+    const [{ data: userRoles }, { data: allRoles }] = await Promise.all([
+      admin
+        .from("user_role_assignment")
+        .select("role_id")
+        .eq("user_id", user.id),
+      admin.from("role").select("role_id, role_type"),
+    ]);
 
-    const roles = (userRoles || [])
-      .map((r: any) => r.role?.role_type)
-      .filter(Boolean);
+    const roleTypeById = new Map<string, string>();
+    (allRoles || []).forEach((r) => {
+      roleTypeById.set(r.role_id, r.role_type);
+    });
+
+    let roles = (userRoles || [])
+      .map((r: any) => roleTypeById.get(r.role_id))
+      .filter((r): r is string => Boolean(r));
+
+    if (roles.length === 0) {
+      const uRole = user.user_metadata?.signup_role || user.user_metadata?.role || "renter";
+      roles = uRole === "both" ? ["renter", "lender"] : [uRole];
+    }
 
     const cookieStore = await cookies();
     const activeRoleCookie = cookieStore.get("chaochao_active_role")?.value;

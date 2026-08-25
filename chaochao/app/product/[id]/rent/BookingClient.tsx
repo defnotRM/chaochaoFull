@@ -84,14 +84,26 @@ function inclusiveDays(startKey: string, endKey: string) {
 
 function toDateKey(val: string | Date | undefined | null): string {
   if (!val) return "";
-  if (typeof val === "string") return val.split("T")[0];
+  if (typeof val === "string") {
+    const clean = val.trim().split("T")[0];
+    const parts = clean.split("-");
+    if (parts.length === 3) {
+      const [y, m, d] = parts.map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        return keyOf(y, m - 1, d);
+      }
+    }
+    return clean;
+  }
   return keyOf(val.getFullYear(), val.getMonth(), val.getDate());
 }
 
 function inRanges(key: string, ranges: DateRange[]) {
+  if (!key || !ranges || ranges.length === 0) return false;
   return ranges.some((r) => {
     const s = toDateKey(r.start);
     const e = toDateKey(r.end);
+    if (!s || !e) return false;
     return key >= s && key <= e;
   });
 }
@@ -128,23 +140,55 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
     const now = new Date();
     const currentMonth = monthValue(now.getFullYear(), now.getMonth());
     if (availability.length === 0) {
-      return { min: currentMonth, max: currentMonth + 5 };
+      return { min: currentMonth, max: currentMonth + 11 };
     }
-    const starts = availability.map((a) => keyToDate(toDateKey(a.start)));
-    const ends = availability.map((a) => keyToDate(toDateKey(a.end)));
-    const minDate = new Date(Math.min(...starts.map((d) => d.getTime())));
-    const maxDate = new Date(Math.max(...ends.map((d) => d.getTime())));
+    const validStarts = availability
+      .map((a) => toDateKey(a.start))
+      .filter(Boolean)
+      .map((k) => keyToDate(k));
+    const validEnds = availability
+      .map((a) => toDateKey(a.end))
+      .filter(Boolean)
+      .map((k) => keyToDate(k));
+
+    if (validStarts.length === 0 || validEnds.length === 0) {
+      return { min: currentMonth, max: currentMonth + 11 };
+    }
+
+    const minDate = new Date(Math.min(...validStarts.map((d) => d.getTime())));
+    const maxDate = new Date(Math.max(...validEnds.map((d) => d.getTime())));
 
     const startMonth = monthValue(minDate.getFullYear(), minDate.getMonth());
     const endMonth = monthValue(maxDate.getFullYear(), maxDate.getMonth());
 
-    const min = Math.max(currentMonth, startMonth);
-    const max = Math.max(min, endMonth);
+    const min = Math.min(currentMonth, startMonth);
+    const max = Math.max(currentMonth + 1, endMonth);
 
     return { min, max };
   }, [availability]);
 
-  const [viewMonth, setViewMonth] = useState(bounds.min); // year*12 + month
+  // หาเดือนแรกที่เริ่มมีวันเปิดให้เช่า (>= วันนี้) เพื่อเปิดปฏิทินให้ตรงกับคิวของผู้ให้เช่าทันที
+  const initialMonth = useMemo(() => {
+    const now = new Date();
+    const currentMonth = monthValue(now.getFullYear(), now.getMonth());
+    if (availability.length === 0) return currentMonth;
+
+    const upcoming = availability
+      .map((a) => ({ s: toDateKey(a.start), e: toDateKey(a.end) }))
+      .filter(({ e }) => e >= todayKey);
+
+    if (upcoming.length > 0) {
+      const firstValidStart = upcoming[0].s;
+      if (firstValidStart) {
+        const targetDateKey = firstValidStart >= todayKey ? firstValidStart : todayKey;
+        const targetDate = keyToDate(targetDateKey);
+        return monthValue(targetDate.getFullYear(), targetDate.getMonth());
+      }
+    }
+    return currentMonth;
+  }, [availability, todayKey]);
+
+  const [viewMonth, setViewMonth] = useState(initialMonth);
 
   // ให้ viewMonth อยู่ใน bounds เสมอเมื่อ bounds เปลี่ยน
   useEffect(() => {
@@ -265,9 +309,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
   const roles = currentUser?.roles || (currentUser?.role ? [currentUser.role] : []);
   const isLenderOnly =
     currentUser !== null &&
-    roles.includes("lender") &&
+    (roles.includes("lender") || roles.includes("ผู้ให้เช่า") || currentUser.role === "lender") &&
     !roles.includes("renter") &&
-    !roles.includes("admin");
+    !roles.includes("ผู้เช่า") &&
+    !roles.includes("both") &&
+    !roles.includes("ผู้ให้เช่า / ผู้เช่า") &&
+    !roles.includes("admin") &&
+    !roles.includes("ผู้ดูแลระบบ");
 
   const canContinue = Boolean(startKey && endKey && pickupId && returnId && !isLenderOnly);
 

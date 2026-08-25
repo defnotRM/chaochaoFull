@@ -66,11 +66,16 @@ export default function BookingWidget({
   }, []);
 
   const roles = currentUser?.roles || (currentUser?.role ? [currentUser.role] : []);
+  const isOwner = Boolean(currentUser?.id && currentUser.id === ownerId);
   const isLenderOnly =
     currentUser !== null &&
-    roles.includes("lender") &&
+    (roles.includes("lender") || roles.includes("ผู้ให้เช่า") || currentUser.role === "lender") &&
     !roles.includes("renter") &&
-    !roles.includes("admin");
+    !roles.includes("ผู้เช่า") &&
+    !roles.includes("both") &&
+    !roles.includes("ผู้ให้เช่า / ผู้เช่า") &&
+    !roles.includes("admin") &&
+    !roles.includes("ผู้ดูแลระบบ");
 
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
@@ -96,7 +101,24 @@ export default function BookingWidget({
       </p>
 
       {/* ปุ่มหลัก → หน้าเลือกวันเช่า */}
-      {isLenderOnly ? (
+      {isOwner ? (
+        <div className="mt-4 space-y-2">
+          <button
+            type="button"
+            disabled
+            className="inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-5 py-3.5 text-sm font-semibold text-slate-400 opacity-80 shadow-none"
+            title="คุณเป็นเจ้าของอุปกรณ์นี้ ไม่สามารถเช่าสินค้าของตนเองได้"
+          >
+            <CalendarDays className="h-5 w-5 text-slate-400" />
+            <span>คุณเป็นเจ้าของอุปกรณ์นี้</span>
+          </button>
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-2.5 text-center text-xs text-sky-800">
+            <p className="font-medium">
+              คุณเป็นผู้ลงประกาศอุปกรณ์ชิ้นนี้ ไม่สามารถกดเช่าสินค้าของตนเองได้
+            </p>
+          </div>
+        </div>
+      ) : isLenderOnly ? (
         <div className="mt-4 space-y-2">
           <button
             type="button"
