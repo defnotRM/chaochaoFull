@@ -157,7 +157,7 @@ function UserProfileContent({ userId }: { userId: string }) {
                     <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
                       {user.username}
                     </h1>
-                    <span className="rounded-full bg-[#c0e6fd]/30 px-2.5 py-0.5 text-xs font-semibold text-[#1b3554]">
+                    <span className="rounded-full border border-[#80aad3]/40 bg-[#c0e6fd]/40 px-3 py-0.5 text-xs font-semibold text-[#1b3554] shadow-2xs">
                       {user.role}
                     </span>
                   </div>
