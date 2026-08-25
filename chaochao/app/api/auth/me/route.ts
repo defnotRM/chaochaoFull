@@ -86,13 +86,7 @@ export async function GET() {
         ? "renter"
         : user.user_metadata?.role || "renter";
 
-    const v = profile?.updated_at
-      ? new Date(profile.updated_at).getTime()
-      : Date.now();
-
-    const avatarUrl = profile?.avatar_url
-      ? `/api/avatar?id=${user.id}&v=${v}`
-      : null;
+    const avatarUrl = profile?.avatar_url || null;
 
     return NextResponse.json({
       user: {

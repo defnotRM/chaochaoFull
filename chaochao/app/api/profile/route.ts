@@ -136,13 +136,8 @@ export async function GET() {
       ? new Date(profile.updated_at).getTime()
       : Date.now();
 
-    const avatarUrl = profile.avatar_url
-      ? `/api/avatar?id=${user.id}&v=${v}`
-      : "";
-
-    const bannerUrl = profile.banner_url
-      ? `/api/banner?id=${user.id}&v=${v}`
-      : "";
+    const avatarUrl = profile.avatar_url || "";
+    const bannerUrl = profile.banner_url || "";
 
     return NextResponse.json({
       user: {
@@ -319,8 +314,8 @@ export async function PATCH(request: Request) {
         username,
         bio: bio ?? "",
         phones: updatedPhones,
-        avatarUrl: avatarUrl === "" ? "" : `/api/avatar?id=${user.id}&v=${now}`,
-        bannerUrl: bannerUrl === "" ? "" : `/api/banner?id=${user.id}&v=${now}`,
+        avatarUrl: avatarUrl === "" ? "" : (avatarUrl || updateData.avatar_url || ""),
+        bannerUrl: bannerUrl === "" ? "" : (bannerUrl || updateData.banner_url || ""),
       },
     });
   } catch (error) {

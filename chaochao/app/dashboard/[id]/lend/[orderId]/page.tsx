@@ -104,12 +104,7 @@ export default async function LenderOrderDetailPage({
     .map((p: any) => p.phone)
     .filter(Boolean);
 
-  const v = renter?.updated_at
-    ? new Date(renter.updated_at).getTime()
-    : Date.now();
-  const avatarUrl = renter?.avatar_url
-    ? `/api/avatar?id=${renter.user_id}&v=${v}`
-    : null;
+  const avatarUrl = renter?.avatar_url || null;
 
   const data: LendOrderData = {
     order: {

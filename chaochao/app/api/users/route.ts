@@ -164,16 +164,12 @@ export async function GET(request: Request) {
         ? "ผู้ให้เช่า"
         : "ผู้เช่า";
 
-      const v = u.updated_at
-        ? new Date(u.updated_at).getTime()
-        : Date.now();
-
       return {
         id: u.user_id,
         username: u.username,
         bio: u.bio || "",
-        avatarUrl: u.avatar_url ? `/api/avatar?id=${u.user_id}&v=${v}` : null,
-        bannerUrl: u.banner_url ? `/api/banner?id=${u.user_id}&v=${v}` : null,
+        avatarUrl: u.avatar_url || null,
+        bannerUrl: u.banner_url || null,
         role: roleLabel,
         primaryRole,
         itemCount: itemCountMap.get(u.user_id) || 0,

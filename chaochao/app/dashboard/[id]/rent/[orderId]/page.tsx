@@ -77,12 +77,7 @@ export default async function UserRentalOrderDetailPage({
     .map((p: any) => p.phone)
     .filter(Boolean);
 
-  const v = owner?.updated_at
-    ? new Date(owner.updated_at).getTime()
-    : Date.now();
-  const avatarUrl = owner?.avatar_url
-    ? `/api/avatar?id=${owner.user_id}&v=${v}`
-    : null;
+  const avatarUrl = owner?.avatar_url || null;
 
   const primaryImage =
     imageRes.data?.find((i) => i.is_primary)?.image_url ??

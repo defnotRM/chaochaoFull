@@ -86,11 +86,9 @@ export async function POST(request: Request) {
       user_metadata: userMetadata,
     });
 
-    const timestampedUrl = `/api/avatar?id=${user.id}&t=${Date.now()}`;
-
     return NextResponse.json({
       message: "อัปโหลดรูปโปรไฟล์สำเร็จ",
-      avatarUrl: timestampedUrl,
+      avatarUrl: base64DataUri,
     });
   } catch (error) {
     console.error("Avatar upload error:", error);

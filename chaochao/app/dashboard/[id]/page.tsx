@@ -88,13 +88,7 @@ export default async function UserDashboardPage({
     ? "lender"
     : "renter";
 
-  const v = userProfile.updated_at
-    ? new Date(userProfile.updated_at).getTime()
-    : Date.now();
-
-  const avatarUrl = userProfile.avatar_url
-    ? `/api/avatar?id=${userProfile.user_id}&v=${v}`
-    : null;
+    const avatarUrl = userProfile.avatar_url || null;
 
   const targetUser = {
     id: userProfile.user_id,

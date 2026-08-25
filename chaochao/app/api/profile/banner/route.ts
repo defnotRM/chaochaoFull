@@ -74,11 +74,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const timestampedUrl = `/api/banner?id=${user.id}&t=${Date.now()}`;
-
     return NextResponse.json({
       message: "อัปโหลดภาพแบนเนอร์สำเร็จ",
-      bannerUrl: timestampedUrl,
+      bannerUrl: base64DataUri,
     });
   } catch (error) {
     console.error("Banner upload error:", error);
