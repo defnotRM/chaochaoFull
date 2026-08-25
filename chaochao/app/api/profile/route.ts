@@ -72,12 +72,51 @@ export async function GET() {
         .eq("user_id", user.id),
     ]);
 
-    const profile = profileRes.data;
-    if (profileRes.error || !profile) {
-      return NextResponse.json(
-        { message: "ไม่พบข้อมูลโปรไฟล์ผู้ใช้" },
-        { status: 404 }
+    let profile = profileRes.data;
+    if (!profile) {
+      const uName = user.user_metadata?.username || user.email?.split("@")[0] || "ผู้ใช้งาน";
+      const uEmail = user.email || `${uName}@chaochao.local`;
+      const uNatId = user.user_metadata?.national_id || null;
+
+      await admin.from("useraccount").upsert(
+        {
+          user_id: user.id,
+          username: uName,
+          email: uEmail,
+          national_id: uNatId,
+          status: "Active",
+        },
+        { onConflict: "user_id" }
       );
+
+      const uRole = user.user_metadata?.signup_role || user.user_metadata?.role || "renter";
+      const rolesToAssign = uRole === "both" ? ["renter", "lender"] : [uRole];
+      const { data: roleRows } = await admin
+        .from("role")
+        .select("role_id, role_type")
+        .in("role_type", rolesToAssign);
+
+      if (roleRows && roleRows.length > 0) {
+        for (const r of roleRows) {
+          await admin.from("user_role_assignment").upsert(
+            { user_id: user.id, role_id: r.role_id },
+            { onConflict: "user_id,role_id" }
+          );
+        }
+      }
+
+      profile = {
+        user_id: user.id,
+        username: uName,
+        email: uEmail,
+        national_id: uNatId,
+        bio: "",
+        avatar_url: null,
+        banner_url: null,
+        updated_at: new Date().toISOString(),
+        status: "Active",
+        created_at: new Date().toISOString(),
+      };
     }
 
     const roles = (rolesRes.data || [])
