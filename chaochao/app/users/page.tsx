@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import Link from "next/link";
+import { createBrowserClient } from "@/lib/supabase/client";
 import {
   Search,
   Users,
@@ -32,8 +33,8 @@ function UsersContent() {
   const [selectedRole, setSelectedRole] = useState<"all" | "lender" | "renter">("all");
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchUsers = useCallback(async (query = "", role = "all") => {
-    setIsLoading(true);
+  const fetchUsers = useCallback(async (query = "", role = "all", silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const params = new URLSearchParams();
       if (query.trim()) params.set("q", query.trim());
@@ -50,7 +51,7 @@ function UsersContent() {
     } catch (err) {
       console.error("Error fetching users:", err);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, []);
 
@@ -76,6 +77,37 @@ function UsersContent() {
       fetchUsers(searchTerm, selectedRole);
     }, 250);
     return () => clearTimeout(timer);
+  }, [searchTerm, selectedRole, fetchUsers]);
+
+  // Supabase Realtime Channel & Polling Fallback
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    const channel = supabase
+      .channel("users-realtime-list")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "useraccount" },
+        () => {
+          fetchUsers(searchTerm, selectedRole, true);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_role_assignment" },
+        () => {
+          fetchUsers(searchTerm, selectedRole, true);
+        }
+      )
+      .subscribe();
+
+    const interval = setInterval(() => {
+      fetchUsers(searchTerm, selectedRole, true);
+    }, 3000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
   }, [searchTerm, selectedRole, fetchUsers]);
 
   return (

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -8,6 +10,46 @@ export async function GET(request: Request) {
     const roleFilter = searchParams.get("role")?.trim() || "all";
 
     const admin = createAdminClient();
+
+    // 0. Auto-sync any auth users missing from useraccount
+    try {
+      const { data: authUsers } = await admin.auth.admin.listUsers();
+      if (authUsers?.users && authUsers.users.length > 0) {
+        for (const au of authUsers.users) {
+          const uName = au.user_metadata?.username || au.email?.split("@")[0] || "ผู้ใช้งาน";
+          const uEmail = au.email || `${uName}@chaochao.local`;
+          const uNatId = au.user_metadata?.national_id || null;
+          await admin.from("useraccount").upsert(
+            {
+              user_id: au.id,
+              username: uName,
+              email: uEmail,
+              national_id: uNatId,
+              status: "Active",
+            },
+            { onConflict: "user_id" }
+          );
+
+          const uRole = au.user_metadata?.signup_role || au.user_metadata?.role || "renter";
+          const rolesToAssign = uRole === "both" ? ["renter", "lender"] : [uRole];
+          const { data: roleRows } = await admin
+            .from("role")
+            .select("role_id, role_type")
+            .in("role_type", rolesToAssign);
+
+          if (roleRows && roleRows.length > 0) {
+            for (const r of roleRows) {
+              await admin.from("user_role_assignment").upsert(
+                { user_id: au.id, role_id: r.role_id },
+                { onConflict: "user_id,role_id" }
+              );
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore sync errors
+    }
 
     // 1. Fetch active users
     let query = admin
