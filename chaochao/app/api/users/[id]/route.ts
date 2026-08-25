@@ -38,11 +38,18 @@ export async function GET(
     // 2. Fetch roles
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
-      .select("role:role_id ( role_type )")
+      .select("role_id")
       .eq("user_id", userId);
 
+    const { data: allRoles } = await admin
+      .from("role")
+      .select("role_id, role_type");
+
+    const roleTypeMap = new Map<string, string>();
+    (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
+
     const roles = (roleAssignments || [])
-      .map((ra: any) => ra.role?.role_type)
+      .map((ra: any) => roleTypeMap.get(ra.role_id))
       .filter(Boolean);
 
     const isLender = roles.includes("lender");

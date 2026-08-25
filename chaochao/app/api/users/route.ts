@@ -42,15 +42,20 @@ export async function GET(request: Request) {
     // 2. Fetch roles for these users
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
-      .select("user_id, role:role_id ( role_type )")
+      .select("user_id, role_id")
       .in("user_id", userIds);
+
+    const { data: allRoles } = await admin
+      .from("role")
+      .select("role_id, role_type");
+
+    const roleTypeMap = new Map<string, string>();
+    (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
 
     const rolesMap = new Map<string, string[]>();
     (roleAssignments || []).forEach((ra: any) => {
       const current = rolesMap.get(ra.user_id) || [];
-      const roleType = Array.isArray(ra.role)
-        ? ra.role[0]?.role_type
-        : ra.role?.role_type;
+      const roleType = roleTypeMap.get(ra.role_id);
       if (roleType) current.push(roleType);
       rolesMap.set(ra.user_id, current);
     });

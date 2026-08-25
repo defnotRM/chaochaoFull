@@ -50,15 +50,22 @@ export async function POST(request: Request) {
     // 3. Resolve user roles from user_role_assignment
     const { data: userRoles, error: roleError } = await admin
       .from("user_role_assignment")
-      .select("role:role_id ( role_type )")
+      .select("role_id")
       .eq("user_id", profile.user_id);
 
     if (roleError) {
       console.error("Role lookup error:", roleError);
     }
 
+    const { data: allRoles } = await admin
+      .from("role")
+      .select("role_id, role_type");
+
+    const roleTypeMap = new Map<string, string>();
+    (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
+
     const assignedRoles = (userRoles || [])
-      .map((item: any) => item.role?.role_type)
+      .map((item: any) => roleTypeMap.get(item.role_id))
       .filter(Boolean);
 
     // Auto-detect role
