@@ -57,15 +57,31 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient();
 
-    const uName = user.user_metadata?.username || user.email?.split("@")[0] || "ผู้ใช้งาน";
-    const uEmail = user.email || `${uName.toLowerCase()}@chaochao.local`;
-    const uNatId = user.user_metadata?.national_id || null;
-
-    // Store in useraccount.banner_url (guaranteed upsert)
-    const { error: dbError } = await admin
+    // 1. Check if useraccount already exists for this user
+    const { data: existingUser } = await admin
       .from("useraccount")
-      .upsert(
-        {
+      .select("user_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    let dbError = null;
+    if (existingUser) {
+      const { error } = await admin
+        .from("useraccount")
+        .update({
+          banner_url: base64DataUri,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", user.id);
+      dbError = error;
+    } else {
+      const uName = user.user_metadata?.username || user.email?.split("@")[0] || `user_${user.id.slice(0, 6)}`;
+      const uEmail = user.email || `${uName.toLowerCase()}@chaochao.local`;
+      const uNatId = user.user_metadata?.national_id || null;
+
+      const { error } = await admin
+        .from("useraccount")
+        .insert({
           user_id: user.id,
           username: uName,
           email: uEmail,
@@ -73,12 +89,12 @@ export async function POST(request: Request) {
           banner_url: base64DataUri,
           status: "Active",
           updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
+        });
+      dbError = error;
+    }
 
     if (dbError) {
-      console.error("useraccount banner upsert error:", dbError);
+      console.error("useraccount banner save error:", dbError);
       return NextResponse.json(
         { message: "ไม่สามารถบันทึกรูปภาพแบนเนอร์ลงในฐานข้อมูลได้" },
         { status: 500 }
