@@ -61,7 +61,7 @@ export async function GET() {
           "user_id, username, email, national_id, bio, avatar_url, banner_url, updated_at, status, created_at"
         )
         .eq("user_id", user.id)
-        .single(),
+        .maybeSingle(),
       admin
         .from("user_role_assignment")
         .select("role ( role_type )")

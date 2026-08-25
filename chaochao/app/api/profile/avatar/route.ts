@@ -58,17 +58,28 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient();
 
-    // 1. Store the image in useraccount.avatar_url
+    const uName = user.user_metadata?.username || user.email?.split("@")[0] || "ผู้ใช้งาน";
+    const uEmail = user.email || `${uName.toLowerCase()}@chaochao.local`;
+    const uNatId = user.user_metadata?.national_id || null;
+
+    // 1. Store the image in useraccount.avatar_url (guaranteed upsert)
     const { error: dbError } = await admin
       .from("useraccount")
-      .update({
-        avatar_url: base64DataUri,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", user.id);
+      .upsert(
+        {
+          user_id: user.id,
+          username: uName,
+          email: uEmail,
+          national_id: uNatId,
+          avatar_url: base64DataUri,
+          status: "Active",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
 
     if (dbError) {
-      console.error("useraccount update error:", dbError);
+      console.error("useraccount avatar upsert error:", dbError);
       return NextResponse.json(
         { message: "ไม่สามารถบันทึกข้อมูลรูปโปรไฟล์ลงในฐานข้อมูลได้" },
         { status: 500 }

@@ -57,17 +57,28 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient();
 
-    // Store in useraccount.banner_url
+    const uName = user.user_metadata?.username || user.email?.split("@")[0] || "ผู้ใช้งาน";
+    const uEmail = user.email || `${uName.toLowerCase()}@chaochao.local`;
+    const uNatId = user.user_metadata?.national_id || null;
+
+    // Store in useraccount.banner_url (guaranteed upsert)
     const { error: dbError } = await admin
       .from("useraccount")
-      .update({
-        banner_url: base64DataUri,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", user.id);
+      .upsert(
+        {
+          user_id: user.id,
+          username: uName,
+          email: uEmail,
+          national_id: uNatId,
+          banner_url: base64DataUri,
+          status: "Active",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
 
     if (dbError) {
-      console.error("useraccount banner update error:", dbError);
+      console.error("useraccount banner upsert error:", dbError);
       return NextResponse.json(
         { message: "ไม่สามารถบันทึกรูปภาพแบนเนอร์ลงในฐานข้อมูลได้" },
         { status: 500 }
