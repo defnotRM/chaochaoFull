@@ -221,9 +221,13 @@ export async function PATCH(request: Request) {
     };
     if (avatarUrl === "") {
       updateData.avatar_url = null;
+    } else if (avatarUrl && avatarUrl.startsWith("data:")) {
+      updateData.avatar_url = avatarUrl;
     }
     if (bannerUrl === "") {
       updateData.banner_url = null;
+    } else if (bannerUrl && bannerUrl.startsWith("data:")) {
+      updateData.banner_url = bannerUrl;
     }
 
     const { error: updateError } = await admin
