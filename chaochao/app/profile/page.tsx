@@ -510,18 +510,51 @@ export default function ProfilePage() {
 
                 {/* Name, Roles, Status */}
                 <div className="pb-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
                       {username || "ผู้ใช้งาน"}
                     </h1>
-                    {roles.map((r) => (
-                      <span
-                        key={r}
-                        className="rounded-full bg-[#c0e6fd]/30 px-2.5 py-0.5 text-xs font-semibold text-[#1b3554]"
-                      >
-                        {roleLabels[r] || r}
+                    
+                    {/* Role Badges */}
+                    {roles && roles.length > 0 ? (
+                      roles.map((r) => {
+                        const isLender = r === "lender" || r === "ผู้ให้เช่า";
+                        const isRenter = r === "renter" || r === "ผู้เช่า";
+                        const isAdmin = r === "admin" || r === "ผู้ดูแลระบบ";
+                        const isBoth = r === "both";
+
+                        const label = isAdmin
+                          ? "ผู้ดูแลระบบ"
+                          : isBoth
+                          ? "ผู้ให้เช่า / ผู้เช่า"
+                          : isLender
+                          ? "ผู้ให้เช่า"
+                          : isRenter
+                          ? "ผู้เช่า"
+                          : r;
+
+                        const colorClass = isAdmin
+                          ? "bg-purple-100 text-purple-800 border-purple-200"
+                          : isLender
+                          ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                          : isBoth
+                          ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                          : "bg-[#c0e6fd]/50 text-[#1b3554] border-[#80aad3]/40";
+
+                        return (
+                          <span
+                            key={r}
+                            className={`inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-semibold shadow-xs ${colorClass}`}
+                          >
+                            {label}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border border-[#80aad3]/40 bg-[#c0e6fd]/50 px-3 py-0.5 text-xs font-semibold text-[#1b3554]">
+                        ผู้เช่า
                       </span>
-                    ))}
+                    )}
                   </div>
 
                   <p className="mt-1 text-xs text-slate-500">

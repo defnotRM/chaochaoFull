@@ -119,9 +119,14 @@ export async function GET() {
       };
     }
 
-    const roles = (rolesRes.data || [])
+    let roles = (rolesRes.data || [])
       .map((item: any) => item.role?.role_type)
       .filter(Boolean);
+
+    if (roles.length === 0) {
+      const uRole = user.user_metadata?.signup_role || user.user_metadata?.role || "renter";
+      roles = uRole === "both" ? ["renter", "lender"] : [uRole];
+    }
 
     const phones = (phonesRes.data || [])
       .map((p: any) => p.phone)
