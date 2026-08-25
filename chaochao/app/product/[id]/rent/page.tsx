@@ -56,7 +56,7 @@ export default async function ProductRentPage({
   }
 
   // 2) เจ้าของ / จุดนัด / คิวว่าง / รูป / ออเดอร์ที่กันคิว — ดึงขนานกัน
-  const [ownerRes, locationsRes, availabilityRes, imageRes, ordersRes] =
+  const [ownerRes, locationsRes, availabilityRes, imageRes, ordersRes, reviewRes] =
     await Promise.all([
       admin
         .from("useraccount")
@@ -83,17 +83,12 @@ export default async function ProductRentPage({
         .select("start_date, end_date, status, order_id")
         .eq("item_id", id)
         .in("status", ACTIVE_ORDER_STATUSES),
+      // เรตติ้งสินค้า: review join ผ่าน rentalorder.order_id ของชิ้นนี้
+      admin
+        .from("review")
+        .select("rating, order:order_id!inner ( item_id )")
+        .eq("order.item_id", id),
     ]);
-
-  // เรตติ้งสินค้า: ดึง review ตาม order_id ของสินค้านี้
-  const { data: itemOrders } = await admin
-    .from("rentalorder")
-    .select("order_id")
-    .eq("item_id", id);
-  const itemOrderIds = (itemOrders || []).map((o) => o.order_id);
-  const { data: itemReviews } = itemOrderIds.length > 0
-    ? await admin.from("review").select("rating").in("order_id", itemOrderIds)
-    : { data: [] };
 
   const owner = ownerRes.data;
   const ownerName =
@@ -129,7 +124,7 @@ export default async function ProductRentPage({
     imageRes.data?.[0]?.image_url ||
     null;
 
-  const reviews = itemReviews || [];
+  const reviews = reviewRes.data || [];
   const rating =
     reviews.length > 0
       ? {

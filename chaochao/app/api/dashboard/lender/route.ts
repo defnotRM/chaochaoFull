@@ -23,9 +23,20 @@ export async function GET(request: NextRequest) {
     }
 
     // 1. ดึงรายการสินค้าทั้งหมดที่ผู้ให้เช่าคนนี้ลงประกาศไว้
-    const { data: rawItems, error: itemsError } = await admin
+    const { data: items, error: itemsError } = await admin
       .from("item")
-      .select("*")
+      .select(`
+        item_id,
+        item_name,
+        description,
+        rental_fee_per_day,
+        deposit,
+        status,
+        created_at,
+        category:category_id (
+          category_name
+        )
+      `)
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
@@ -33,74 +44,80 @@ export async function GET(request: NextRequest) {
       console.error("Error fetching lender items:", itemsError);
     }
 
-    const items = rawItems || [];
-    const categoryIds = Array.from(new Set(items.map((i) => i.category_id).filter(Boolean)));
-
-    const { data: rawCategories } = categoryIds.length > 0
-      ? await admin.from("itemcategory").select("*").in("category_id", categoryIds)
-      : { data: [] };
-
-    const categoryMap = new Map((rawCategories || []).map((c) => [c.category_id, c]));
-
-    const itemList = items.map((it) => ({
-      ...it,
-      category: categoryMap.get(it.category_id) || null,
-    }));
+    const itemList = items || [];
     const itemIds = itemList.map((i) => i.item_id);
 
     // 2. ดึงคำขอเช่า/คำสั่งเช่าทั้งหมดที่ส่งเข้ามายังสินค้าของผู้ให้เช่าคนนี้
     let incomingOrders: any[] = [];
     if (itemIds.length > 0) {
-      const { data: rawOrders, error: ordersError } = await admin
+      const { data: orders, error: ordersError } = await admin
         .from("rentalorder")
-        .select("*")
+        .select(`
+          order_id,
+          item_id,
+          user_id,
+          start_date,
+          end_date,
+          rental_fee,
+          deposit,
+          total_paid,
+          status,
+          meetup_location,
+          return_location,
+          created_at,
+          item:item_id (
+            item_name
+          ),
+          renter:user_id (
+            user_id,
+            username,
+            avatar_url,
+            firstname,
+            lastname
+          ),
+          payment:payment (
+            payment_id,
+            status
+          )
+        `)
         .in("item_id", itemIds)
         .order("created_at", { ascending: false });
 
       if (ordersError) {
         console.error("Error fetching incoming orders:", ordersError);
-      } else if (rawOrders && rawOrders.length > 0) {
-        const renterUserIds = Array.from(new Set(rawOrders.map((o) => o.user_id).filter(Boolean)));
-        const orderIds = rawOrders.map((o) => o.order_id);
+      } else if (orders) {
+        // Fetch renter phones
+        const renterUserIds = orders.map((o) => o.user_id).filter(Boolean);
+        const { data: phones } = await admin
+          .from("userphones")
+          .select("user_id, phone")
+          .in("user_id", renterUserIds);
 
-        const [{ data: rawRenters }, { data: rawPhones }, { data: rawPayments }] = await Promise.all([
-          admin.from("useraccount").select("user_id, username, avatar_url, firstname, lastname").in("user_id", renterUserIds),
-          admin.from("userphones").select("user_id, phone").in("user_id", renterUserIds),
-          admin.from("payment").select("payment_id, order_id, status").in("order_id", orderIds),
-        ]);
-
-        const renterMap = new Map((rawRenters || []).map((u) => [u.user_id, u]));
-        const phoneMap = new Map((rawPhones || []).map((p) => [p.user_id, p.phone]));
-        const paymentsByOrder = new Map<string, any[]>();
-        (rawPayments || []).forEach((p) => {
-          const list = paymentsByOrder.get(p.order_id) || [];
-          list.push(p);
-          paymentsByOrder.set(p.order_id, list);
+        const phoneMap = new Map<string, string>();
+        (phones || []).forEach((p) => {
+          if (!phoneMap.has(p.user_id)) {
+            phoneMap.set(p.user_id, p.phone);
+          }
         });
 
-        const itemById = new Map(itemList.map((i) => [i.item_id, i]));
-
-        incomingOrders = rawOrders.map((o: any) => {
-          const payments = paymentsByOrder.get(o.order_id) || [];
-          const hasPendingPayment = payments.some((p: any) => p.status === "pending");
-          const rUser = renterMap.get(o.user_id);
-          const item = itemById.get(o.item_id);
+        incomingOrders = orders.map((o: any) => {
+          const hasPendingPayment = Array.isArray(o.payment)
+            ? o.payment.some((p: any) => p.status === "pending")
+            : false;
 
           return {
             ...o,
-            item: item ? { item_name: item.item_name } : null,
             hasPendingPayment,
-            payment: payments,
-            renter: rUser
+            renter: o.renter
               ? {
                   username:
-                    rUser.username ||
-                    `${rUser.firstname || ""} ${rUser.lastname || ""}`.trim() ||
+                    o.renter.username ||
+                    `${o.renter.firstname || ""} ${o.renter.lastname || ""}`.trim() ||
                     "ผู้เช่า",
-                  avatarUrl: rUser.avatar_url
-                    ? `/api/avatar?id=${rUser.user_id}`
+                  avatarUrl: o.renter.avatar_url
+                    ? `/api/avatar?id=${o.renter.user_id}`
                     : null,
-                  phone: phoneMap.get(rUser.user_id) || null,
+                  phone: phoneMap.get(o.renter.user_id) || null,
                 }
               : null,
           };

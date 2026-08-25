@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -42,21 +39,13 @@ export async function GET(request: Request) {
     // 2. Fetch roles for these users
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
-      .select("user_id, role_id")
+      .select("user_id, role:role_id ( role_type )")
       .in("user_id", userIds);
-
-    const { data: allRoles } = await admin
-      .from("role")
-      .select("role_id, role_type");
-
-    const roleTypeMap = new Map<string, string>();
-    (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
 
     const rolesMap = new Map<string, string[]>();
     (roleAssignments || []).forEach((ra: any) => {
       const current = rolesMap.get(ra.user_id) || [];
-      const roleType = roleTypeMap.get(ra.role_id);
-      if (roleType) current.push(roleType);
+      if (ra.role?.role_type) current.push(ra.role.role_type);
       rolesMap.set(ra.user_id, current);
     });
 

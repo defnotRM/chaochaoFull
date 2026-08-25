@@ -24,18 +24,9 @@ export async function POST(request: Request) {
       .or(`username.eq.${username},email.eq.${username}`)
       .maybeSingle();
 
-    if (profileError) {
-      console.error("Login profile query error:", profileError);
+    if (profileError || !profile) {
       return NextResponse.json(
-        { message: "เกิดข้อผิดพลาดในการค้นหาผู้ใช้: " + profileError.message },
-        { status: 500 }
-      );
-    }
-
-    if (!profile) {
-      console.error("Login user not found for input:", username);
-      return NextResponse.json(
-        { message: "ไม่พบชื่อผู้ใช้หรืออีเมลนี้ในระบบ" },
+        { message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" },
         { status: 401 }
       );
     }
@@ -50,22 +41,15 @@ export async function POST(request: Request) {
     // 3. Resolve user roles from user_role_assignment
     const { data: userRoles, error: roleError } = await admin
       .from("user_role_assignment")
-      .select("role_id")
+      .select("role:role_id ( role_type )")
       .eq("user_id", profile.user_id);
 
     if (roleError) {
       console.error("Role lookup error:", roleError);
     }
 
-    const { data: allRoles } = await admin
-      .from("role")
-      .select("role_id, role_type");
-
-    const roleTypeMap = new Map<string, string>();
-    (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
-
     const assignedRoles = (userRoles || [])
-      .map((item: any) => roleTypeMap.get(item.role_id))
+      .map((item: any) => item.role?.role_type)
       .filter(Boolean);
 
     // Auto-detect role

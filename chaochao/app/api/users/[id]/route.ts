@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export async function GET(
   _request: Request,
   props: { params: Promise<{ id: string }> }
@@ -38,19 +35,12 @@ export async function GET(
     // 2. Fetch roles
     const { data: roleAssignments } = await admin
       .from("user_role_assignment")
-      .select("role_id")
+      .select("role:role_id ( role_type )")
       .eq("user_id", userId);
 
-    const { data: allRoles } = await admin
-      .from("role")
-      .select("role_id, role_type");
-
-    const roleTypeMap = new Map<string, string>();
-    (allRoles || []).forEach((r: any) => roleTypeMap.set(r.role_id, r.role_type));
-
-    const roles: string[] = (roleAssignments || [])
-      .map((ra: any) => roleTypeMap.get(ra.role_id))
-      .filter((r): r is string => Boolean(r));
+    const roles = (roleAssignments || [])
+      .map((ra: any) => ra.role?.role_type)
+      .filter(Boolean);
 
     const isLender = roles.includes("lender");
     const isRenter = roles.includes("renter");

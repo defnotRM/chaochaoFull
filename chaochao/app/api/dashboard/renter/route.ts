@@ -3,7 +3,6 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,81 +22,58 @@ export async function GET(request: NextRequest) {
     }
 
     // 1. ดึงรายการคำสั่งเช่าของผู้เช่าคนนี้
-    const { data: rawOrders, error: ordersError } = await admin
+    const { data: orders, error } = await admin
       .from("rentalorder")
-      .select("*")
+      .select(`
+        order_id,
+        user_id,
+        item_id,
+        start_date,
+        end_date,
+        rental_fee,
+        deposit,
+        total_paid,
+        status,
+        meetup_location,
+        return_location,
+        created_at,
+        item:item_id (
+          item_id,
+          item_name,
+          description,
+          rental_fee_per_day,
+          deposit,
+          status,
+          user_id,
+          lender:user_id (
+            username,
+            avatar_url
+          )
+        ),
+        payment:payment (
+          payment_id,
+          status
+        )
+      `)
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
-    if (ordersError) {
-      console.error("Error fetching renter orders:", ordersError);
+    if (error) {
+      console.error("Error fetching renter orders:", error);
       return NextResponse.json({
         orders: [],
         metrics: { active: 0, pending: 0, completed: 0, totalSpent: 0 },
       });
     }
 
-    const orders = rawOrders || [];
-    const itemIds = Array.from(new Set(orders.map((o) => o.item_id).filter(Boolean)));
-    const orderIds = orders.map((o) => o.order_id);
+    const orderList = (orders || []).map((o: any) => ({
+      ...o,
+      hasPendingPayment: Array.isArray(o.payment)
+        ? o.payment.some((p: any) => p.status === "pending")
+        : false,
+    }));
 
-    // 2. ดึงข้อมูลสินค้าที่เกี่ยวข้อง
-    const { data: rawItems } = itemIds.length > 0
-      ? await admin.from("item").select("*").in("item_id", itemIds)
-      : { data: [] };
-
-    const items = rawItems || [];
-    const lenderIds = Array.from(new Set(items.map((i) => i.user_id).filter(Boolean)));
-
-    // 3. ดึงข้อมูลผู้ให้เช่า (Lenders)
-    const { data: rawLenders } = lenderIds.length > 0
-      ? await admin
-          .from("useraccount")
-          .select("user_id, username, avatar_url, firstname, lastname")
-          .in("user_id", lenderIds)
-      : { data: [] };
-
-    const lenderMap = new Map((rawLenders || []).map((l) => [l.user_id, l]));
-
-    // 4. ดึงข้อมูลการชำระเงิน (Payments)
-    const { data: rawPayments } = orderIds.length > 0
-      ? await admin
-          .from("payment")
-          .select("payment_id, order_id, status")
-          .in("order_id", orderIds)
-      : { data: [] };
-
-    const paymentsByOrder = new Map<string, any[]>();
-    (rawPayments || []).forEach((p) => {
-      const list = paymentsByOrder.get(p.order_id) || [];
-      list.push(p);
-      paymentsByOrder.set(p.order_id, list);
-    });
-
-    // 5. ประกอบข้อมูล (Enrich in JS)
-    const itemMap = new Map(
-      items.map((it) => [
-        it.item_id,
-        {
-          ...it,
-          lender: lenderMap.get(it.user_id) || null,
-        },
-      ])
-    );
-
-    const orderList = orders.map((o) => {
-      const payments = paymentsByOrder.get(o.order_id) || [];
-      const hasPendingPayment = payments.some((p) => p.status === "pending");
-
-      return {
-        ...o,
-        item: itemMap.get(o.item_id) || null,
-        payment: payments,
-        hasPendingPayment,
-      };
-    });
-
-    // 6. คำนวณสรุปสถิติ
+    // 2. คำนวณสรุปสถิติ
     const activeStatuses = [
       "requested",
       "awaiting_payment",
