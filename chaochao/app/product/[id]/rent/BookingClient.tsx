@@ -41,25 +41,47 @@ const thb = new Intl.NumberFormat("th-TH", {
   maximumFractionDigits: 0,
 });
 
-// pin timezone ให้ SSR กับ client ตรงกัน (กัน hydration mismatch)
-const monthTitleFmt = new Intl.DateTimeFormat("th-TH", {
-  timeZone: "Asia/Bangkok",
-  month: "long",
-  year: "numeric",
-});
+const THAI_MONTHS_SHORT = [
+  "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+];
 
-const longDateFmt = new Intl.DateTimeFormat("th-TH", {
-  timeZone: "Asia/Bangkok",
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-});
+const THAI_MONTHS_FULL = [
+  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+];
 
-const joinedFmt = new Intl.DateTimeFormat("th-TH", {
-  timeZone: "Asia/Bangkok",
-  month: "short",
-  year: "numeric",
-});
+function formatKey(key: string | null | undefined): string {
+  if (!key) return "";
+  const clean = key.trim().split("T")[0];
+  const parts = clean.split("-").map(Number);
+  if (parts.length === 3) {
+    const [y, m, d] = parts;
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d) && m >= 1 && m <= 12) {
+      return `${d} ${THAI_MONTHS_SHORT[m - 1]} ${y + 543}`;
+    }
+  }
+  return clean;
+}
+
+function formatMonthTitle(year: number, monthIndex: number): string {
+  const m = Math.max(0, Math.min(11, monthIndex));
+  return `${THAI_MONTHS_FULL[m]} ${year + 543}`;
+}
+
+function getTodayKey(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    const now = new Date();
+    return keyOf(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+}
 
 /* ────────────────────────────── date helpers ────────────────────────────── */
 
@@ -73,7 +95,8 @@ function keyOf(year: number, month: number, day: number) {
 }
 
 function keyToDate(key: string) {
-  const [y, m, d] = key.split("-").map(Number);
+  const clean = key.trim().split("T")[0];
+  const [y, m, d] = clean.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
 
@@ -112,28 +135,13 @@ function monthValue(year: number, month: number) {
   return year * 12 + month;
 }
 
-function formatDisplayDate(val: string | Date | undefined | null) {
-  if (!val) return "";
-  const clean = typeof val === "string" ? val.split("T")[0] : "";
-  if (!clean) return "";
-  const parts = clean.split("-").map(Number);
-  if (parts.length === 3) {
-    const [y, m, d] = parts;
-    return longDateFmt.format(new Date(Date.UTC(y, m - 1, d, 12, 0, 0)));
-  }
-  return clean;
-}
-
 /* ────────────────────────────── component ────────────────────────────── */
 
 export default function BookingClient({ data }: { data: BookingPageData }) {
   const { item, owner, locations, availability, bookedRanges, rating } = data;
   const router = useRouter();
 
-  const todayKey = useMemo(() => {
-    const now = new Date();
-    return keyOf(now.getFullYear(), now.getMonth(), now.getDate());
-  }, []);
+  const todayKey = useMemo(() => getTodayKey(), []);
 
   // ขอบเขตเดือนที่เลื่อนดูได้ = ยึดตามช่วง availability ที่ผู้ให้เช่าเปิดไว้จริง
   const bounds = useMemo(() => {
@@ -438,7 +446,7 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                             >
                               <Clock3 className="h-3 w-3 text-sky-600" />
                               <span>
-                                ช่วงที่เปิดให้เช่า: {formatDisplayDate(r.start)} – {formatDisplayDate(r.end)}
+                                ช่วงที่เปิดให้เช่า: {formatKey(r.start)} – {formatKey(r.end)}
                               </span>
                             </span>
                           ))}
@@ -459,9 +467,7 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                     <ChevronLeft className="h-4 w-4" />
                   </button>
                   <span className="w-32 text-center text-sm font-semibold text-slate-800">
-                    {monthTitleFmt.format(
-                      new Date(viewYear, viewMonthIndex, 1)
-                    )}
+                    {formatMonthTitle(viewYear, viewMonthIndex)}
                   </span>
                   <button
                     type="button"
@@ -524,7 +530,7 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                       disabled={!selectable}
                       onClick={() => handleDayClick(key)}
                       aria-pressed={isEndpoint}
-                      aria-label={`${longDateFmt.format(keyToDate(key))}${
+                      aria-label={`${formatKey(key)}${
                         booked
                           ? " ถูกจองแล้ว"
                           : !open
@@ -556,15 +562,15 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                   {endKey ? (
                     <span>
                       เลือก{" "}
-                      <strong>{longDateFmt.format(keyToDate(startKey))}</strong>{" "}
+                      <strong>{formatKey(startKey)}</strong>{" "}
                       ถึง{" "}
-                      <strong>{longDateFmt.format(keyToDate(endKey))}</strong> (
+                      <strong>{formatKey(endKey)}</strong> (
                       {days} วัน)
                     </span>
                   ) : (
                     <span>
                       เริ่ม{" "}
-                      <strong>{longDateFmt.format(keyToDate(startKey))}</strong>{" "}
+                      <strong>{formatKey(startKey)}</strong>{" "}
                       — เลือกวันสิ้นสุดอีกครั้ง
                     </span>
                   )}
