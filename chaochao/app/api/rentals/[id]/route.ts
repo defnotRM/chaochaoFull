@@ -12,15 +12,13 @@ export async function GET(_request: NextRequest, { params }: Params) {
   const { id } = await params;
   const admin = createAdminClient();
 
-  const { data, error } = await admin
+  const { data: order, error } = await admin
     .from("rentalorder")
     .select(
       `
         order_id, user_id, item_id, meetup_location, return_location,
         start_date, end_date, rental_fee, deposit, total_paid,
-        fee, net_income, status, created_at, updated_at,
-        item:item_id ( item_id, item_name, user_id, rental_fee_per_day, deposit, itemimage ( image_url, is_primary ) ),
-        payment:payment ( payment_id, amount, status, slip_image_url, date )
+        fee, net_income, status, created_at, updated_at
       `
     )
     .eq("order_id", id)
@@ -30,11 +28,27 @@ export async function GET(_request: NextRequest, { params }: Params) {
     console.error("Error fetching rental order:", error);
     return apiError("ไม่สามารถดึงข้อมูลรายการเช่าได้", 500);
   }
-  if (!data) {
+  if (!order) {
     return apiError("ไม่พบรายการเช่านี้", 404);
   }
 
-  return apiSuccess(data);
+  const [{ data: item }, { data: itemImages }, { data: payments }] = await Promise.all([
+    order.item_id
+      ? admin.from("item").select("item_id, item_name, user_id, rental_fee_per_day, deposit").eq("item_id", order.item_id).maybeSingle()
+      : { data: null },
+    order.item_id
+      ? admin.from("itemimage").select("image_url, is_primary").eq("item_id", order.item_id)
+      : { data: [] },
+    admin.from("payment").select("payment_id, amount, status, slip_image_url, date").eq("order_id", id),
+  ]);
+
+  const fullData = {
+    ...order,
+    item: item ? { ...item, itemimage: itemImages || [] } : null,
+    payment: payments || [],
+  };
+
+  return apiSuccess(fullData);
 }
 
 // PATCH /api/rentals/[id] — เปลี่ยนสถานะ (approve -> awaiting_payment, reject -> rejected, cancel -> cancelled)

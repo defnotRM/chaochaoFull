@@ -58,7 +58,7 @@ export async function POST(request: Request) {
 
     const { data: order, error: orderError } = await admin
       .from("rentalorder")
-      .select("order_id, user_id, status, item:item_id ( user_id )")
+      .select("order_id, user_id, item_id, status")
       .eq("order_id", orderId)
       .maybeSingle();
 
@@ -66,7 +66,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "ไม่พบออเดอร์นี้" }, { status: 404 });
     }
 
-    const uId = userId || (order.item as any)?.user_id || order.user_id;
+    let ownerUserId = userId;
+    if (!ownerUserId && order.item_id) {
+      const { data: item } = await admin
+        .from("item")
+        .select("user_id")
+        .eq("item_id", order.item_id)
+        .maybeSingle();
+      ownerUserId = item?.user_id;
+    }
+    const uId = ownerUserId || order.user_id;
 
     // ถ้าไม่มีรูปถูกส่งมา ให้ใช้รูป default สำหรับ mock
     if (imageUrls.length === 0) {
