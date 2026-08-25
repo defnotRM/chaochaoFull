@@ -545,16 +545,10 @@ export default function ProfilePage() {
                           ? "ผู้เช่า"
                           : r;
 
-                        const colorClass = isAdmin
-                          ? "bg-purple-100 text-purple-800 border-purple-200"
-                          : isLender
-                          ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                          : "bg-[#c0e6fd]/50 text-[#1b3554] border-[#80aad3]/40";
-
                         return (
                           <span
                             key={r}
-                            className={`inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-semibold shadow-2xs ${colorClass}`}
+                            className="inline-flex items-center rounded-full border border-[#80aad3]/40 bg-[#c0e6fd]/40 px-3 py-0.5 text-xs font-semibold text-[#1b3554] shadow-2xs"
                           >
                             {label}
                           </span>
