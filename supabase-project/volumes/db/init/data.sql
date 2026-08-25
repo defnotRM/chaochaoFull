@@ -490,12 +490,12 @@ BEGIN
   FOR UPDATE;
 
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'à¹„à¸¡à¹ˆà¸žà¸š order: %', p_order_id;
+    RAISE EXCEPTION 'ไม่พบ order: %', p_order_id;
   END IF;
 
   -- à¹€à¸‰à¸žà¸²à¸°à¹€à¸ˆà¹‰à¸²à¸‚à¸­à¸‡à¸ªà¸´à¸™à¸„à¹‰à¸² (à¸œà¸¹à¹‰à¹ƒà¸«à¹‰à¹€à¸Šà¹ˆà¸²à¸‚à¸­à¸‡ order à¸™à¸µà¹‰) à¸«à¸£à¸·à¸­ admin à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™à¸—à¸µà¹ˆà¸•à¸±à¸”à¸ªà¸´à¸™à¸„à¹ˆà¸²à¹€à¸ªà¸µà¸¢à¸«à¸²à¸¢à¹„à¸”à¹‰
   IF NOT owns_item(v_item_id) AND NOT is_admin() THEN
-    RAISE EXCEPTION 'à¹€à¸‰à¸žà¸²à¸°à¸œà¸¹à¹‰à¹ƒà¸«à¹‰à¹€à¸Šà¹ˆà¸²à¸‚à¸­à¸‡ order à¸™à¸µà¹‰à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™à¸—à¸µà¹ˆà¸›à¸´à¸”à¸à¸²à¸£à¹€à¸Šà¹ˆà¸²à¹„à¸”à¹‰';
+    RAISE EXCEPTION 'เฉพาะผู้ให้เช่าของ order นี้เท่านั้นà¸—à¸µà¹ˆà¸›à¸´à¸”à¸à¸²à¸£à¹€à¸Šà¹ˆà¸²à¹„à¸”à¹‰';
   END IF;
 
   IF p_damage_cost = 0 THEN
@@ -1249,24 +1249,24 @@ f2c593f7-8479-416e-b08e-352a37727b9e	lender
 --
 
 COPY public.test_results (test_no, test_name, result, detail) FROM stdin;
-1	à¸à¸±à¸™à¸ˆà¸­à¸‡à¸ªà¸´à¸™à¸„à¹‰à¸²à¸‹à¹‰à¸­à¸™à¸§à¸±à¸™ (EXCLUDE)	PASS	\N
-2	à¸à¸±à¸™à¸£à¸¹à¸›à¸›à¸à¸‹à¹‰à¸³ (partial unique index)	PASS	\N
-3	à¸à¸±à¸™à¸šà¸±à¸à¸Šà¸µ default à¸‹à¹‰à¸³	PASS	\N
-4	à¸à¸±à¸™à¸«à¹‰à¸­à¸‡à¹à¸Šà¸—à¸‹à¹‰à¸³	PASS	\N
-5	à¸à¸±à¸™à¸£à¸²à¸„à¸²à¸•à¸´à¸”à¸¥à¸š (CHECK)	PASS	\N
-6	à¸à¸±à¸™ end_date à¸œà¸´à¸”à¸¥à¸³à¸”à¸±à¸š (CHECK)	PASS	\N
-7	à¸à¸±à¸™à¸¥à¸š user à¸—à¸µà¹ˆà¸¢à¸±à¸‡à¸¡à¸µà¸ªà¸´à¸™à¸„à¹‰à¸² (RESTRICT)	PASS	\N
-8	à¸à¸±à¸™à¸£à¸µà¸§à¸´à¸§à¸‹à¹‰à¸³ order à¹€à¸”à¸´à¸¡ (UNIQUE)	PASS	\N
-9	à¸à¸±à¸™à¹à¸Šà¸—à¸à¸±à¸šà¸•à¸±à¸§à¹€à¸­à¸‡ (CHECK)	PASS	\N
+1	กันจองสินค้าซ้อนวัน (EXCLUDE)	PASS	\N
+2	กันรูปปกซ้ำ (partial unique index)	PASS	\N
+3	กันบัญชี default ซ้ำ	PASS	\N
+4	กันห้องแชทซ้ำ	PASS	\N
+5	กันราคาติดลบ (CHECK)	PASS	\N
+6	กัน end_date ผิดลำดับ (CHECK)	PASS	\N
+7	กันลบ user ที่ยังมีสินค้า (RESTRICT)	PASS	\N
+8	กันรีวิวซ้ำ order เดิม (UNIQUE)	PASS	\N
+9	กันแชทกับตัวเอง (CHECK)	PASS	\N
 10	trigger set_updated_at()	PASS	\N
 11	trigger on_auth_user_created	PASS	\N
-12	settle_rental_order (à¹„à¸¡à¹ˆà¸¡à¸µà¸„à¸§à¸²à¸¡à¹€à¸ªà¸µà¸¢à¸«à¸²à¸¢)	PASS	completed_no_damage
-13	settle_rental_order (à¸¡à¸±à¸”à¸ˆà¸³à¹„à¸¡à¹ˆà¸žà¸­)	PASS	awaiting_additional_payment:2000.00
-14	submit_review à¸šà¸¥à¹‡à¸­à¸ order à¹„à¸¡à¹ˆ completed	PASS	à¸£à¸µà¸§à¸´à¸§à¹„à¸”à¹‰à¹€à¸‰à¸žà¸²à¸° order à¸—à¸µà¹ˆà¹€à¸ªà¸£à¹‡à¸ˆà¸ªà¸¡à¸šà¸¹à¸£à¸“à¹Œà¹à¸¥à¹‰à¸§à¹à¸¥à¸°à¹€à¸›à¹‡à¸™à¸‚à¸­à¸‡à¸„à¸¸à¸“à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™
-15	resolve_dispute à¸šà¸¥à¹‡à¸­à¸à¸„à¸™à¸—à¸µà¹ˆà¹„à¸¡à¹ˆà¹ƒà¸Šà¹ˆ admin	PASS	à¹€à¸‰à¸žà¸²à¸°à¹à¸­à¸”à¸¡à¸´à¸™à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™à¸—à¸µà¹ˆà¸•à¸±à¸”à¸ªà¸´à¸™à¸‚à¹‰à¸­à¸žà¸´à¸žà¸²à¸—à¹„à¸”à¹‰
-16	RLS: mint à¸¡à¸­à¸‡à¹„à¸¡à¹ˆà¹€à¸«à¹‡à¸™à¸šà¸±à¸à¸Šà¸µà¸„à¸™à¸­à¸·à¹ˆà¸™	PASS	\N
-17	RLS: mint à¹à¸à¹‰à¸ªà¸´à¸™à¸„à¹‰à¸²à¸„à¸™à¸­à¸·à¹ˆà¸™à¹„à¸¡à¹ˆà¹„à¸”à¹‰	PASS	\N
-18	RLS: admin à¹€à¸«à¹‡à¸™à¸—à¸¸à¸à¸šà¸±à¸à¸Šà¸µ	PASS	2 à¹à¸–à¸§
+12	settle_rental_order (ไม่มีความเสียหาย)	PASS	completed_no_damage
+13	settle_rental_order (มัดจำไม่พอ)	PASS	awaiting_additional_payment:2000.00
+14	submit_review บล็อก order ไม่ completed	PASS	รีวิวได้เฉพาะ order ที่เสร็จสมบูรณ์แล้วและเป็นของคุณเท่านั้น
+15	resolve_dispute บล็อกคนที่ไม่ใช่ admin	PASS	เฉพาะแอดมินเท่านั้นที่ตัดสินข้อพิพาทได้
+16	RLS: mint มองไม่เห็นบัญชีคนอื่น	PASS	\N
+17	RLS: mint แก้สินค้าคนอื่นไม่ได้	PASS	\N
+18	RLS: admin เห็นทุกบัญชี	PASS	2 แถว
 \.
 
 
