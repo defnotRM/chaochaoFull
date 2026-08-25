@@ -7,7 +7,6 @@ import {
   Heart,
   Menu,
   MessageCircle,
-  Search,
   X,
   User as UserIcon,
   LogOut,
@@ -39,34 +38,6 @@ function Brand() {
         CHAOCHAO
       </span>
     </Link>
-  );
-}
-
-// ช่องค้นหานี้ใช้ร่วมกันทั้ง Laptop/Desktop และ Tablet/Mobile
-function SearchBar({ mobile = false }: { mobile?: boolean }) {
-  return (
-    <form
-      action="/renter/hireproduct"
-      role="search"
-      className={mobile ? "w-full" : "mx-8 min-w-0 max-w-2xl flex-1"}
-    >
-      <label className="relative block">
-        <span className="sr-only">ค้นหาอุปกรณ์</span>
-        <input
-          type="search"
-          name="q"
-          placeholder="ค้นหาอุปกรณ์ที่ต้องการ"
-          className="h-12 w-full rounded-full border border-slate-200 bg-slate-50/70 py-3 pl-5 pr-14 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
-        />
-        <button
-          type="submit"
-          aria-label="ค้นหา"
-          className="absolute right-1.5 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full text-[#1b3554] transition hover:bg-sky-100 focus-visible:outline-2 focus-visible:outline-sky-600"
-        >
-          <Search aria-hidden="true" className="h-5 w-5" />
-        </button>
-      </label>
-    </form>
   );
 }
 
@@ -175,21 +146,15 @@ export default function Navbarver2() {
     }
   };
 
-  const dashboardLink =
-    user?.role === "lender"
-      ? "/lender/mydashboard"
-      : user?.role === "admin"
-      ? "/admin"
-      : "/renter/mydashboard";
+  const dashboardLink = user?.id ? `/dashboard/${user.id}` : "/dashboard";
 
   const userInitial = user?.username ? user.username[0].toUpperCase() : "U";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
       {/* Laptop/Desktop: แสดงตั้งแต่ breakpoint lg (1024px) ขึ้นไป */}
-      <nav className="mx-auto hidden h-20 max-w-7xl items-center px-6 lg:flex lg:px-8">
+      <nav className="mx-auto hidden h-20 max-w-7xl items-center justify-between px-6 lg:flex lg:px-8">
         <Brand />
-        <SearchBar />
 
         {/* เมนูด้านขวาของ Laptop/Desktop */}
         <div className="flex shrink-0 items-center gap-2.5">
@@ -356,11 +321,6 @@ export default function Navbarver2() {
           </div>
         </div>
 
-        {/* ช่องค้นหาแถวล่างของ Tablet/Mobile */}
-        <div className="border-t border-slate-100 px-4 pb-3 pt-3 sm:px-6">
-          <SearchBar mobile />
-        </div>
-
         {/* เมนู Dropdown ที่แสดงเมื่อกด Hamburger */}
         {isOpen && (
           <div
@@ -376,7 +336,7 @@ export default function Navbarver2() {
                 หน้าแรก
               </Link>
               <Link
-                href="/renter/hireproduct"
+                href="/products"
                 onClick={() => setIsOpen(false)}
                 className="rounded-lg px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-sky-50 hover:text-[#17326b]"
               >
