@@ -14,17 +14,12 @@ export async function GET(_request: NextRequest, { params }: Params) {
     const { id } = await params;
     const admin = createAdminClient();
 
-    const { data, error } = await admin
+    const { data: item, error } = await admin
       .from("item")
       .select(
         `
           item_id, user_id, category_id, item_name, description,
-          original_price, rental_fee_per_day, deposit, status, created_at, updated_at,
-          category:category_id ( category_id, category_name ),
-          itemimage ( image_id, image_url, is_primary, sequence ),
-          itemlocation ( location_id, description, no, alley, road, subdistrict, district, province ),
-          itemcondition ( seq, condition ),
-          availability ( availability_id, start_date, end_date )
+          original_price, rental_fee_per_day, deposit, status, created_at, updated_at
         `
       )
       .eq("item_id", id)
@@ -34,9 +29,26 @@ export async function GET(_request: NextRequest, { params }: Params) {
       console.error("Error fetching product:", error);
       return apiError("ไม่สามารถดึงข้อมูลสินค้าได้", 500);
     }
-    if (!data) {
+    if (!item) {
       return apiError("ไม่พบสินค้านี้", 404);
     }
+
+    const [imagesRes, locationsRes, conditionsRes, availRes, catRes] = await Promise.all([
+      admin.from("itemimage").select("image_id, image_url, is_primary, sequence").eq("item_id", id).order("sequence", { ascending: true }),
+      admin.from("itemlocation").select("location_id, description, no, alley, road, subdistrict, district, province").eq("item_id", id),
+      admin.from("itemcondition").select("seq, condition").eq("item_id", id).order("seq", { ascending: true }),
+      admin.from("availability").select("availability_id, start_date, end_date").eq("item_id", id),
+      item.category_id ? admin.from("itemcategory").select("category_id, category_name").eq("category_id", item.category_id).maybeSingle() : { data: null },
+    ]);
+
+    const data = {
+      ...item,
+      category: catRes.data || null,
+      itemimage: imagesRes.data || [],
+      itemlocation: locationsRes.data || [],
+      itemcondition: conditionsRes.data || [],
+      availability: availRes.data || [],
+    };
 
     return apiSuccess(data);
   } catch (err) {
@@ -49,12 +61,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 export async function PATCH(request: NextRequest, { params }: Params) {
   try {
     const { id } = await params;
-    const supabase = await createClient();
     const admin = createAdminClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
 
     const body = await request.json();
     const parsed = updateProductSchema.safeParse(body);
@@ -128,6 +135,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         }));
         await admin.from("itemcondition").insert(conditionRows);
       }
+    }
+
+    // 5) Update Images if provided
+    if (input.images && input.images.length > 0) {
+      await admin.from("itemimage").delete().eq("item_id", id);
+      const imageRows = input.images.map((img, idx) => ({
+        item_id: id,
+        image_url: typeof img === "string" ? img : img.imageUrl,
+        is_primary: idx === 0,
+        sequence: idx + 1,
+      }));
+      await admin.from("itemimage").insert(imageRows);
     }
 
     return apiSuccess({ message: "แก้ไขสินค้าสำเร็จ", item: itemData });

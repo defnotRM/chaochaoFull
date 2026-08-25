@@ -55,6 +55,15 @@ export const updateProductSchema = z.object({
   status: z
     .enum(["available", "rented", "maintenance", "inactive"])
     .optional(),
+  images: z
+    .array(
+      z.object({
+        imageUrl: z.string().min(1),
+        isPrimary: z.boolean().nullish().default(false),
+        sequence: z.number().int().nullish(),
+      })
+    )
+    .nullish(),
   locations: z
     .array(
       z.object({

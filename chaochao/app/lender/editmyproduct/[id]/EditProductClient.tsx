@@ -58,6 +58,7 @@ interface InitialItem {
   rental_fee_per_day: number;
   deposit: number;
   status: string;
+  itemimage?: Array<{ image_id?: string; image_url: string; is_primary?: boolean; sequence?: number }>;
   itemlocation?: ItemLocation[];
   itemcondition?: ItemCondition[];
   availability?: Availability[];
@@ -82,6 +83,14 @@ export default function EditProductClient({
   const sixMonthsLater = new Date();
   sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6);
   const sixMonthsLaterStr = sixMonthsLater.toISOString().split("T")[0];
+
+  // Images prefill
+  const initialImgs = (initialItem.itemimage || []).map((i) => i.image_url).filter(Boolean);
+  const [imageUrls, setImageUrls] = useState<string[]>(
+    initialImgs.length > 0
+      ? initialImgs
+      : ["https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80"]
+  );
 
   // Form states with initial values
   const [itemName, setItemName] = useState(initialItem.item_name || "");
@@ -192,6 +201,11 @@ export default function EditProductClient({
         availabilityStart,
         availabilityEnd,
         conditions: conditions.filter(Boolean),
+        images: imageUrls.map((url, idx) => ({
+          imageUrl: url,
+          isPrimary: idx === 0,
+          sequence: idx + 1,
+        })),
       };
 
       const res = await fetch(`/api/products/${initialItem.item_id}`, {
@@ -412,12 +426,20 @@ export default function EditProductClient({
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-5">
-            {/* กล่องรูปภาพ Placeholder เหมือนในรูป */}
-            <div className="relative flex aspect-square w-48 sm:w-56 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-[#eaf0f6] shadow-sm">
-              <Package className="h-20 w-20 text-[#a0b5ce]" strokeWidth={1.5} />
+            {/* กล่องรูปภาพ Preview */}
+            <div className="relative flex aspect-square w-48 sm:w-56 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-[#eaf0f6] shadow-sm overflow-hidden">
+              {imageUrls[0] ? (
+                <img
+                  src={imageUrls[0]}
+                  alt={itemName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <Package className="h-20 w-20 text-[#a0b5ce]" strokeWidth={1.5} />
+              )}
             </div>
 
-            {/* กล่องปุ่มเพิ่มรูป (กดแล้วยังไม่มีอะไรเกิดขึ้นตามต้องการ) */}
+            {/* กล่องปุ่มเพิ่มรูป */}
             <div className="flex flex-1 flex-col justify-center space-y-3 w-full">
               <button
                 type="button"
