@@ -533,8 +533,7 @@ export default function LendOrderDetailClient({
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-base text-slate-900">{renter.fullName || renter.username}</h3>
-                    <span className="text-xs text-slate-400">(@{renter.username})</span>
+                    <h3 className="font-bold text-base text-slate-900">{renter.username || renter.fullName}</h3>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 pt-1">

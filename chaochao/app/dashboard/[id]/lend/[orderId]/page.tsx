@@ -63,10 +63,7 @@ export default async function LenderOrderDetailPage({
     null;
 
   const renter = renterRes.data;
-  const renterFullName =
-    [renter?.firstname, renter?.lastname].filter(Boolean).join(" ").trim() ||
-    renter?.username ||
-    "ผู้เช่า";
+  const renterFullName = renter?.username || "ผู้เช่า";
 
   const renterPhones = (phoneRes.data || [])
     .map((p: any) => p.phone)

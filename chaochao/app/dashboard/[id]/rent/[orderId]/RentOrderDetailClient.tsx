@@ -478,9 +478,8 @@ export default function RentOrderDetailClient({
                       href={owner.id ? `/user/${owner.id}` : "#"}
                       className="font-bold text-base text-slate-900 transition hover:text-[#1b3554]"
                     >
-                      {owner.fullName || owner.username}
+                      {owner.username || owner.fullName}
                     </Link>
-                    <span className="text-xs text-slate-400">(@{owner.username})</span>
                     {owner.status === "Active" && (
                       <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-emerald-600">
                         <BadgeCheck className="h-4 w-4" />

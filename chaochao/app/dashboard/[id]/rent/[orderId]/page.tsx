@@ -71,10 +71,7 @@ export default async function UserRentalOrderDetailPage({
   ]);
 
   const owner = ownerRes.data;
-  const ownerFullName =
-    [owner?.firstname, owner?.lastname].filter(Boolean).join(" ").trim() ||
-    owner?.username ||
-    "ผู้ให้เช่า";
+  const ownerFullName = owner?.username || "ผู้ให้เช่า";
 
   const ownerPhones = ((ownerPhoneRes as any).data || [])
     .map((p: any) => p.phone)
