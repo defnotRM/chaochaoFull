@@ -17,14 +17,55 @@ export async function POST(request: Request) {
     const { username, password, role } = validation.data;
     const admin = createAdminClient();
 
-    // 2. Lookup user profile in useraccount by username or email
-    const { data: profile, error: profileError } = await admin
+    const cleanInput = username.trim();
+    const cleanEmail = cleanInput.includes("@")
+      ? cleanInput.toLowerCase()
+      : `${cleanInput.toLowerCase()}@chaochao.local`;
+
+    // 2. Lookup user profile in useraccount by username or email (case-insensitive)
+    let { data: profile, error: profileError } = await admin
       .from("useraccount")
       .select("user_id, username, email, status")
-      .or(`username.eq.${username},email.eq.${username}`)
+      .or(`username.ilike.${cleanInput},email.ilike.${cleanInput},email.ilike.${cleanEmail}`)
       .maybeSingle();
 
-    if (profileError || !profile) {
+    // Fallback: If not found in useraccount table, search Supabase Auth users directly
+    if (!profile) {
+      const { data: authUsers } = await admin.auth.admin.listUsers();
+      const matched = authUsers?.users?.find(
+        (u) =>
+          u.email?.toLowerCase() === cleanInput.toLowerCase() ||
+          u.email?.toLowerCase() === cleanEmail.toLowerCase() ||
+          (u.user_metadata?.username &&
+            String(u.user_metadata.username).toLowerCase() === cleanInput.toLowerCase())
+      );
+
+      if (matched) {
+        const uName = matched.user_metadata?.username || cleanInput;
+        const uEmail = matched.email || cleanEmail;
+        const uNatId = matched.user_metadata?.national_id || null;
+
+        await admin.from("useraccount").upsert(
+          {
+            user_id: matched.id,
+            username: uName,
+            email: uEmail,
+            national_id: uNatId,
+            status: "Active",
+          },
+          { onConflict: "user_id" }
+        );
+
+        profile = {
+          user_id: matched.id,
+          username: uName,
+          email: uEmail,
+          status: "Active",
+        };
+      }
+    }
+
+    if (!profile) {
       return NextResponse.json(
         { message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" },
         { status: 401 }
@@ -48,11 +89,30 @@ export async function POST(request: Request) {
       console.error("Role lookup error:", roleError);
     }
 
-    const assignedRoles = (userRoles || [])
+    let assignedRoles = (userRoles || [])
       .map((item: any) => item.role?.role_type)
       .filter(Boolean);
 
-    // Auto-detect role
+    if (assignedRoles.length === 0) {
+      // Fallback: assign renter role if missing
+      const { data: defaultRole } = await admin
+        .from("role")
+        .select("role_id")
+        .eq("role_type", "renter")
+        .maybeSingle();
+
+      if (defaultRole) {
+        await admin
+          .from("user_role_assignment")
+          .upsert(
+            { user_id: profile.user_id, role_id: defaultRole.role_id },
+            { onConflict: "user_id,role_id" }
+          );
+      }
+      assignedRoles = ["renter"];
+    }
+
+    // Auto-detect active role
     const resolvedRole =
       role && assignedRoles.includes(role)
         ? role
@@ -66,14 +126,20 @@ export async function POST(request: Request) {
 
     // 4. Authenticate using Supabase Auth (stores session in cookies via @supabase/ssr)
     const supabase = await createServerClient();
-    const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({
-        email: profile.email,
+    let authRes = await supabase.auth.signInWithPassword({
+      email: profile.email,
+      password,
+    });
+
+    if (authRes.error && cleanEmail !== profile.email) {
+      authRes = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
         password,
       });
+    }
 
-    if (authError || !authData.user) {
-      console.error("Auth sign-in error:", authError);
+    if (authRes.error || !authRes.data.user) {
+      console.error("Auth sign-in error:", authRes.error);
       return NextResponse.json(
         { message: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง" },
         { status: 401 }

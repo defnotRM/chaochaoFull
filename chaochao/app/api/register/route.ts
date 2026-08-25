@@ -74,14 +74,19 @@ export async function POST(request: Request) {
 
     const userId = authData.user.id;
 
-    // 5. Update national_id and active status in public.useraccount
+    // 5. Ensure profile exists and is active in public.useraccount
     await admin
       .from("useraccount")
-      .update({
-        national_id: nationalId,
-        status: "Active",
-      })
-      .eq("user_id", userId);
+      .upsert(
+        {
+          user_id: userId,
+          username: username.trim(),
+          email,
+          national_id: nationalId,
+          status: "Active",
+        },
+        { onConflict: "user_id" }
+      );
 
     // 6. Assign roles in public.user_role_assignment
     const rolesToAssign =
