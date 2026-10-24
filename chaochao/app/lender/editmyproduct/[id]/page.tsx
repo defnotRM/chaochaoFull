@@ -15,9 +15,7 @@ export default async function EditProductPage({
   const [{ data: item, error: itemError }, { data: categories }] = await Promise.all([
     admin
       .from("item")
-      .select(
-        "item_id, user_id, category_id, item_name, description, original_price, rental_fee_per_day, deposit, status, created_at, updated_at"
-      )
+      .select("*")
       .eq("item_id", id)
       .maybeSingle(),
     admin

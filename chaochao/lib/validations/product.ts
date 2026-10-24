@@ -1,9 +1,14 @@
 import { z } from "zod";
 
 // ตรงกับ constraint ใน Item table: original_price/rental_fee_per_day/deposit >= 0
-const nonNegativeNumber = z
-  .number()
-  .min(0, "ต้องเป็นจำนวนที่ไม่ติดลบ");
+const nonNegativeNumber = z.number().min(0, "ต้องเป็นจำนวนที่ไม่ติดลบ");
+
+export const MAX_PRODUCT_IMAGES = 10;
+
+// ตรงกับ CHECK constraint ของ item.item_condition (migration 25)
+const itemCondition = z.enum(["like-new", "good", "fair"], {
+  message: "กรุณาเลือกสภาพการใช้งานของอุปกรณ์",
+});
 
 export const createProductSchema = z.object({
   categoryId: z.string().nullish(),
@@ -15,14 +20,16 @@ export const createProductSchema = z.object({
   originalPrice: nonNegativeNumber.nullish(),
   rentalFeePerDay: nonNegativeNumber,
   deposit: nonNegativeNumber,
+  condition: itemCondition.optional().default("good"),
   images: z
     .array(
       z.object({
         imageUrl: z.string().min(1, "URL รูปไม่ถูกต้อง"),
         isPrimary: z.boolean().nullish().default(false),
         sequence: z.number().int().nullish(),
-      })
+      }),
     )
+    .max(MAX_PRODUCT_IMAGES, `อัปโหลดรูปภาพได้ไม่เกิน ${MAX_PRODUCT_IMAGES} รูป`)
     .nullish()
     .default([]),
   locations: z
@@ -35,7 +42,8 @@ export const createProductSchema = z.object({
         subdistrict: z.string().nullish(),
         district: z.string().nullish(),
         province: z.string().nullish(),
-      })
+        location_type: z.enum(["meetup", "return", "both"]).nullish(),
+      }),
     )
     .min(1, "ต้องระบุตำแหน่งสินค้าอย่างน้อย 1 ที่"),
   availabilityStart: z.string().min(1, "รูปแบบวันที่ไม่ถูกต้อง"),
@@ -52,17 +60,17 @@ export const updateProductSchema = z.object({
   originalPrice: nonNegativeNumber.nullish(),
   rentalFeePerDay: nonNegativeNumber.nullish(),
   deposit: nonNegativeNumber.nullish(),
-  status: z
-    .enum(["available", "rented", "maintenance", "inactive"])
-    .optional(),
+  status: z.enum(["available", "rented", "maintenance", "inactive"]).optional(),
+  condition: itemCondition.optional(),
   images: z
     .array(
       z.object({
         imageUrl: z.string().min(1),
         isPrimary: z.boolean().nullish().default(false),
         sequence: z.number().int().nullish(),
-      })
+      }),
     )
+    .max(MAX_PRODUCT_IMAGES, `อัปโหลดรูปภาพได้ไม่เกิน ${MAX_PRODUCT_IMAGES} รูป`)
     .nullish(),
   locations: z
     .array(
@@ -74,7 +82,8 @@ export const updateProductSchema = z.object({
         subdistrict: z.string().nullish(),
         district: z.string().nullish(),
         province: z.string().nullish(),
-      })
+        location_type: z.enum(["meetup", "return", "both"]).nullish(),
+      }),
     )
     .nullish(),
   availabilityStart: z.string().nullish(),
