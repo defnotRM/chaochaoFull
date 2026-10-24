@@ -1,21 +1,27 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   MessageCircle,
   Search,
   Send,
-  Plus,
   ArrowLeft,
   X,
   User,
   CheckCheck,
   Check,
   Loader2,
+  Lock,
+  Package,
+  Calendar,
+  ExternalLink,
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { useToast, ToastProvider } from "@/components/ui/Toast";
+import { ORDER_STATUS_CONFIG } from "@/lib/chat-statuses";
 
 interface Partner {
   id: string;
@@ -25,13 +31,27 @@ interface Partner {
   status: string;
 }
 
+interface ChatOrder {
+  id: string;
+  status: string;
+  startDate: string;
+  endDate: string;
+  itemId: string;
+  itemName: string;
+  itemImageUrl: string | null;
+}
+
 interface ChatRoom {
   id: string;
+  orderId: string | null;
+  isClosed: boolean;
+  myRole: "renter" | "lender";
   lastMessage: string;
   updatedAt: string;
   createdAt: string;
   unreadCount: number;
   partner: Partner;
+  order: ChatOrder | null;
 }
 
 interface MessageItem {
@@ -43,14 +63,6 @@ interface MessageItem {
   content: string;
   isRead: boolean;
   createdAt: string;
-}
-
-interface SearchUser {
-  id: string;
-  username: string;
-  avatarUrl: string | null;
-  role: string;
-  status: string;
 }
 
 function formatChatTime(dateString: string) {
@@ -98,14 +110,27 @@ function formatMessageGroupDate(dateString: string) {
   });
 }
 
-function ChatContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const targetUserIdParam = searchParams.get("userId");
-  const targetUsernameParam = searchParams.get("user");
+function formatOrderDate(dateString?: string) {
+  if (!dateString) return "";
+  const d = new Date(dateString);
+  return d.toLocaleDateString("th-TH", {
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  });
+}
 
+function ChatContent() {
+  const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const targetRoomIdParam = searchParams.get("roomId");
+  const targetOrderIdParam = searchParams.get("orderId");
+
+  const [currentUserId, setCurrentUserId] = useState<string>("");
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(
+    targetRoomIdParam,
+  );
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [inputText, setInputText] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -113,61 +138,100 @@ function ChatContent() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
-  // New Chat Modal state
-  const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
-  const [userQuery, setUserQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
-  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
-
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const roomChannelRef = useRef<any>(null);
+  const globalChannelRef = useRef<any>(null);
 
   const activeRoom = rooms.find((r) => r.id === selectedRoomId);
 
-  // Isolate scrolling to the chat box only (never scroll the main browser window)
+  // โหลด user ปัจจุบัน
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user) setCurrentUserId(data.user.id);
+    });
+  }, []);
+
   const scrollToBottom = useCallback((smooth = true) => {
     if (messagesContainerRef.current) {
       const container = messagesContainerRef.current;
       if (smooth) {
-        container.scrollTo({
-          top: container.scrollHeight,
-          behavior: "smooth",
-        });
+        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
       } else {
         container.scrollTop = container.scrollHeight;
       }
     }
   }, []);
 
-  // 1. Fetch Rooms List (with smart state diffing to prevent unnecessary re-renders)
   const fetchRooms = useCallback(async () => {
     try {
       const res = await fetch("/api/chat/rooms", { cache: "no-store" });
       if (res.status === 401) {
         setRooms([]);
-        return;
+        return [];
       }
       if (res.ok) {
         const data = await res.json();
         const incomingRooms: ChatRoom[] = data.rooms || [];
-        setRooms((prev) => {
-          if (
-            prev.length === incomingRooms.length &&
-            JSON.stringify(prev) === JSON.stringify(incomingRooms)
-          ) {
-            return prev;
-          }
-          return incomingRooms;
-        });
+        setRooms(incomingRooms);
+        return incomingRooms;
       }
+      return [];
     } catch (err) {
       console.error("Error fetching chat rooms:", err);
+      return [];
     } finally {
       setIsLoadingRooms(false);
     }
-  }, [router]);
+  }, []);
 
-  // 2. Fetch Messages for Active Room (with smart state diffing)
+  // เปิดห้องตาม targetOrderIdParam หรือ targetRoomIdParam
+  useEffect(() => {
+    let cancelled = false;
+
+    async function initSelection() {
+      const loadedRooms = await fetchRooms();
+      if (cancelled) return;
+
+      if (targetOrderIdParam) {
+        // หาห้องของ orderId นี้
+        const match = loadedRooms.find((r: ChatRoom) => r.orderId === targetOrderIdParam);
+        if (match) {
+          setSelectedRoomId(match.id);
+        } else {
+          // หากยังไม่มีห้อง ให้สร้างห้องใหม่สำหรับ orderId นี้
+          try {
+            const res = await fetch("/api/chat/rooms", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ orderId: targetOrderIdParam }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.roomId) {
+                await fetchRooms();
+                if (!cancelled) {
+                  setSelectedRoomId(data.roomId);
+                }
+              }
+            }
+          } catch (createErr) {
+            console.error("Error opening chat by orderId:", createErr);
+          }
+        }
+      } else if (targetRoomIdParam) {
+        setSelectedRoomId(targetRoomIdParam);
+      }
+    }
+
+    void initSelection();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetRoomIdParam, targetOrderIdParam, fetchRooms]);
+
   const fetchMessages = useCallback(
     async (roomId: string, silent = false, autoScroll = false) => {
       if (!silent) setIsLoadingMessages(true);
@@ -180,18 +244,35 @@ function ChatContent() {
           const incomingMessages: MessageItem[] = data.messages || [];
 
           setMessages((prev) => {
-            if (
-              prev.length === incomingMessages.length &&
-              JSON.stringify(prev) === JSON.stringify(incomingMessages)
-            ) {
-              return prev;
+            // ดึง optimistic messages ที่กำลังส่งอยู่ (temp-*)
+            const pendingOptimistic = prev.filter((m) => m.id.startsWith("temp-"));
+
+            if (pendingOptimistic.length === 0) {
+              if (
+                prev.length === incomingMessages.length &&
+                JSON.stringify(prev) === JSON.stringify(incomingMessages)
+              ) {
+                return prev;
+              }
+              return incomingMessages;
             }
-            return incomingMessages;
+
+            // ถ้ามี optimistic messages ให้คงไว้ ไม่ให้ถูก silent poll เขียนทับจนหาย
+            const activePending = pendingOptimistic.filter(
+              (p) =>
+                !incomingMessages.some(
+                  (m) =>
+                    m.content === p.content &&
+                    m.isMe &&
+                    Math.abs(new Date(m.createdAt).getTime() - new Date(p.createdAt).getTime()) < 15000,
+                ),
+            );
+
+            return [...incomingMessages, ...activePending];
           });
 
-          // Clear unread count for this room locally
           setRooms((prev) =>
-            prev.map((r) => (r.id === roomId ? { ...r, unreadCount: 0 } : r))
+            prev.map((r) => (r.id === roomId ? { ...r, unreadCount: 0 } : r)),
           );
 
           if (autoScroll) {
@@ -204,121 +285,159 @@ function ChatContent() {
         if (!silent) setIsLoadingMessages(false);
       }
     },
-    [scrollToBottom]
+    [scrollToBottom],
   );
 
-  // Handle URL Query Params (e.g. /chat?userId=... or /chat?user=...)
   useEffect(() => {
-    const handleUrlTarget = async () => {
-      if (targetUserIdParam || targetUsernameParam) {
-        try {
-          const res = await fetch("/api/chat/rooms", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              targetUserId: targetUserIdParam || undefined,
-              targetUsername: targetUsernameParam || undefined,
-            }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            await fetchRooms();
-            if (data.roomId) {
-              setSelectedRoomId(data.roomId);
-            }
-          }
-        } catch (err) {
-          console.error("Error opening target chat from URL:", err);
+    let cancelled = false;
+    const run = async () => {
+      if (selectedRoomId) {
+        if (!cancelled) {
+          await fetchMessages(selectedRoomId, false, true);
         }
+        inputRef.current?.focus();
+      } else {
+        setMessages([]);
       }
     };
-
-    handleUrlTarget();
-  }, [targetUserIdParam, targetUsernameParam, fetchRooms]);
-
-  // Initial Load
-  useEffect(() => {
-    fetchRooms();
-  }, [fetchRooms]);
-
-  // When selected room changes, fetch messages and scroll down once
-  useEffect(() => {
-    if (selectedRoomId) {
-      fetchMessages(selectedRoomId, false, true);
-      inputRef.current?.focus();
-    } else {
-      setMessages([]);
-    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedRoomId, fetchMessages]);
 
-  // 3. Supabase Realtime Setup (gentle sync without excessive polling)
   useEffect(() => {
     const supabase = createBrowserClient();
 
-    // Listen to changes on message and chatroom
-    const channel = supabase
-      .channel("realtime-chat-sync")
+    // 1. Channel สำหรับห้องแชทที่กำลังเปิดอยู่ (Broadcast แบบเรียลไทม์ทันที < 50ms)
+    let roomChannel: any = null;
+    if (selectedRoomId) {
+      roomChannel = supabase
+        .channel(`chat-room-${selectedRoomId}`)
+        .on(
+          "broadcast",
+          { event: "new_message" },
+          (event: { payload?: Record<string, unknown> }) => {
+            const incomingMsg = event.payload as unknown as MessageItem;
+            if (incomingMsg && incomingMsg.roomId === selectedRoomId) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === incomingMsg.id)) return prev;
+
+                // หากเป็นข้อความจากตัวเราเองที่ broadcast กลับมา และมี optimistic temp ค้างอยู่ ให้แทนที่
+                if (incomingMsg.senderId === currentUserId) {
+                  const hasTemp = prev.some(
+                    (m) => m.id.startsWith("temp-") && m.content === incomingMsg.content,
+                  );
+                  if (hasTemp) {
+                    return prev.map((m) =>
+                      m.id.startsWith("temp-") && m.content === incomingMsg.content
+                        ? { ...incomingMsg, isMe: true }
+                        : m,
+                    );
+                  }
+                }
+
+                return [
+                  ...prev,
+                  {
+                    ...incomingMsg,
+                    isMe: incomingMsg.senderId === currentUserId,
+                  },
+                ];
+              });
+              setTimeout(() => scrollToBottom(true), 20);
+            }
+            void fetchRooms();
+          },
+        )
+        .subscribe();
+
+      roomChannelRef.current = roomChannel;
+    }
+
+    // 2. Global Channel สำหรับรับ event เรียลไทม์ทั้งแบบ Broadcast และ Database Changes
+    const globalChannel = supabase
+      .channel("realtime-chat-global-sync")
+      .on("broadcast", { event: "room_updated" }, () => {
+        void fetchRooms();
+        if (selectedRoomId) {
+          void fetchMessages(selectedRoomId, true, false);
+        }
+      })
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "message" },
-        (payload: any) => {
-          const newMsg = payload.new;
-          if (selectedRoomId && newMsg.chat_room_id === selectedRoomId) {
-            fetchMessages(selectedRoomId, true, true);
-          }
-          fetchRooms();
-        }
+        { event: "*", schema: "public", table: "chatroom" },
+        () => {
+          void fetchRooms();
+        },
       )
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "chatroom" },
+        { event: "UPDATE", schema: "public", table: "rentalorder" },
         () => {
-          fetchRooms();
-        }
+          void fetchRooms();
+        },
       )
       .subscribe();
 
-    // Gentle background poll (every 15s) only when tab is visible
-    const handleVisibilityCheck = () => {
+    globalChannelRef.current = globalChannel;
+
+    // 3. Silent Polling ทุก 2.5 วินาที — สแตนด์บายสำรองตลอดเวลาเพื่อให้แชทอัปเดตต่อเนื่องไม่มีสะดุด
+    const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
-        fetchRooms();
         if (selectedRoomId) {
-          fetchMessages(selectedRoomId, true, false);
+          void fetchMessages(selectedRoomId, true, false);
         }
+        void fetchRooms();
+      }
+    }, 2500);
+
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") {
+        if (selectedRoomId) {
+          void fetchMessages(selectedRoomId, true, false);
+        }
+        void fetchRooms();
       }
     };
-
-    const interval = setInterval(handleVisibilityCheck, 15000);
-    window.addEventListener("focus", handleVisibilityCheck);
+    window.addEventListener("focus", handleFocus);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (roomChannel) supabase.removeChannel(roomChannel);
+      supabase.removeChannel(globalChannel);
       clearInterval(interval);
-      window.removeEventListener("focus", handleVisibilityCheck);
+      window.removeEventListener("focus", handleFocus);
+      roomChannelRef.current = null;
+      globalChannelRef.current = null;
     };
-  }, [selectedRoomId, fetchRooms, fetchMessages]);
+  }, [selectedRoomId, currentUserId, fetchRooms, fetchMessages, scrollToBottom]);
 
-  // Send Message
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!selectedRoomId || !inputText.trim() || isSending) return;
+    if (
+      !selectedRoomId ||
+      !inputText.trim() ||
+      isSending ||
+      activeRoom?.isClosed
+    )
+      return;
 
     const content = inputText.trim();
     setInputText("");
     setIsSending(true);
 
-    // Optimistic message
     const tempId = `temp-${Date.now()}`;
     const optimisticMsg: MessageItem = {
       id: tempId,
       roomId: selectedRoomId,
-      senderId: "me",
+      senderId: currentUserId || "me",
       isMe: true,
       type: "text",
       content,
       isRead: false,
       createdAt: new Date().toISOString(),
     };
+
     setMessages((prev) => [...prev, optimisticMsg]);
     setTimeout(() => scrollToBottom(true), 20);
 
@@ -335,119 +454,87 @@ function ChatContent() {
 
       if (res.ok) {
         const data = await res.json();
-        setMessages((prev) =>
-          prev.map((m) => (m.id === tempId ? data.message : m))
-        );
-        fetchRooms();
+        const serverMsg: MessageItem = {
+          ...data.message,
+          isMe: true,
+        };
+
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === tempId)) {
+            return prev.map((m) => (m.id === tempId ? serverMsg : m));
+          }
+          if (!prev.some((m) => m.id === serverMsg.id)) {
+            return [...prev, serverMsg];
+          }
+          return prev;
+        });
+
+        void fetchRooms();
         setTimeout(() => scrollToBottom(true), 20);
+
+        // Broadcast เรียลไทม์ทันทีไปยังคู่สนทนาในห้องแชท (< 50ms)
+        if (roomChannelRef.current) {
+          roomChannelRef.current.send({
+            type: "broadcast",
+            event: "new_message",
+            payload: serverMsg,
+          });
+        }
+        // Broadcast แจ้งเตือนห้องแชทโดยรวม
+        if (globalChannelRef.current) {
+          globalChannelRef.current.send({
+            type: "broadcast",
+            event: "room_updated",
+            payload: { roomId: selectedRoomId },
+          });
+        }
       } else {
+        const errData = await res.json().catch(() => ({}));
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        alert("ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง");
+        toast.error(errData.message || "ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง");
       }
     } catch (err) {
       console.error("Error sending message:", err);
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      toast.error("เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่อีกครั้ง");
     } finally {
       setIsSending(false);
       inputRef.current?.focus();
     }
   };
 
-  // Search Users for New Chat Modal
-  useEffect(() => {
-    if (!isNewChatModalOpen) return;
-
-    const timer = setTimeout(async () => {
-      setIsSearchingUsers(true);
-      try {
-        const res = await fetch(
-          `/api/chat/users?q=${encodeURIComponent(userQuery)}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          setSearchResults(data.users || []);
-        }
-      } catch (err) {
-        console.error("Error searching users:", err);
-      } finally {
-        setIsSearchingUsers(false);
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [userQuery, isNewChatModalOpen]);
-
-  // Start chat with user from modal
-  const handleStartChatWithUser = async (targetUser: SearchUser) => {
-    try {
-      const res = await fetch("/api/chat/rooms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetUserId: targetUser.id }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setIsNewChatModalOpen(false);
-        setUserQuery("");
-        await fetchRooms();
-        if (data.roomId) {
-          setSelectedRoomId(data.roomId);
-        }
-      }
-    } catch (err) {
-      console.error("Error starting chat:", err);
-    }
-  };
-
-  // Filter rooms by search term
-  const filteredRooms = rooms.filter((r) =>
-    r.partner.username.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredRooms = rooms.filter((r) => {
+    const term = searchTerm.toLowerCase();
+    const matchPartner = r.partner?.username?.toLowerCase().includes(term);
+    const matchItem = r.order?.itemName?.toLowerCase().includes(term);
+    return matchPartner || matchItem;
+  });
 
   return (
     <div className="mx-auto flex h-[calc(100vh-80px)] max-w-7xl overflow-hidden bg-slate-50 p-2 sm:p-4 lg:p-6">
-      {/* Container Box */}
       <div className="flex h-full w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-xl">
-        {/* ========================================================================= */}
-        {/* LEFT COLUMN: Conversation List */}
-        {/* ========================================================================= */}
+        {/* LEFT COLUMN: รายการห้องแชทตามออเดอร์ */}
         <div
           className={`flex h-full w-full flex-col border-r border-slate-200 bg-white transition-all duration-300 md:w-80 lg:w-96 ${
             selectedRoomId ? "hidden md:flex" : "flex"
           }`}
         >
-          {/* Header */}
           <div className="border-b border-slate-100 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1b3554] text-white shadow-sm">
-                  <MessageCircle className="h-5 w-5" />
-                </div>
-                <h1 className="text-lg font-bold text-[#000f22]">
-                  กล่องข้อความ
-                </h1>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1b3554] text-white shadow-sm">
+                <MessageCircle className="h-5 w-5" />
               </div>
-
-              {/* ปุ่มเริ่มแชทใหม่ */}
-              <button
-                onClick={() => {
-                  setIsNewChatModalOpen(true);
-                  setUserQuery("");
-                }}
-                className="flex items-center gap-1.5 rounded-xl bg-[#c0e6fd]/30 px-3 py-1.5 text-xs font-semibold text-[#1b3554] transition hover:bg-[#c0e6fd]/60 active:scale-95"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>แชทใหม่</span>
-              </button>
+              <div>
+                <h1 className="text-lg font-bold text-[#000f22]">กล่องข้อความ</h1>
+                <p className="text-[11px] text-slate-400">แชทประสานงานตามรายการเช่า</p>
+              </div>
             </div>
 
-            {/* ช่องค้นหาบทสนทนา */}
             <div className="relative mt-3">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="ค้นหาชื่อผู้ใช้..."
+                placeholder="ค้นหาสินค้า หรือชื่อผู้ใช้..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50/70 pl-9 pr-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#3f6593] focus:bg-white focus:ring-2 focus:ring-[#c0e6fd]/50"
@@ -463,7 +550,6 @@ function ChatContent() {
             </div>
           </div>
 
-          {/* Rooms List */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
             {isLoadingRooms ? (
               <div className="flex h-40 flex-col items-center justify-center gap-2 text-slate-400">
@@ -473,59 +559,99 @@ function ChatContent() {
             ) : filteredRooms.length === 0 ? (
               <div className="flex h-64 flex-col items-center justify-center p-6 text-center">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-                  <MessageCircle className="h-6 w-6" />
+                  <Package className="h-6 w-6" />
                 </div>
                 <p className="mt-3 text-sm font-medium text-slate-700">
-                  {searchTerm ? "ไม่พบการสนทนาที่ค้นหา" : "ยังไม่มีประวัติการพูดคุย"}
+                  {searchTerm
+                    ? "ไม่พบการสนทนาที่ค้นหา"
+                    : "ยังไม่มีประวัติการพูดคุยในออเดอร์"}
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  กดปุ่ม "+ แชทใหม่" ด้านบนเพื่อเริ่มพูดคุยกับผู้ใช้งานอื่น
+                <p className="mt-1 text-xs text-slate-400 max-w-xs">
+                  ระบบแชทจะเปิดใช้งานโดยอัตโนมัติเมื่อมีการส่งคำขอเช่าสินค้าเกิดขึ้น
                 </p>
               </div>
             ) : (
               filteredRooms.map((room) => {
                 const isSelected = room.id === selectedRoomId;
-                const partnerInitial = room.partner.username
-                  ? room.partner.username[0].toUpperCase()
-                  : "U";
+                const statusMeta = ORDER_STATUS_CONFIG[room.order?.status || ""] || {
+                  label: room.order?.status || "การสนทนา",
+                  badgeCls: "bg-slate-100 text-slate-700 border-slate-200",
+                };
 
                 return (
                   <button
                     key={room.id}
                     onClick={() => setSelectedRoomId(room.id)}
-                    className={`flex w-full items-center gap-3.5 p-3.5 text-left transition ${
+                    className={`flex w-full items-start gap-3 p-3.5 text-left transition ${
                       isSelected
-                        ? "bg-[#c0e6fd]/25 border-l-4 border-[#1b3554]"
+                        ? "bg-[#c0e6fd]/20 border-l-4 border-[#1b3554]"
                         : "hover:bg-slate-50"
                     }`}
                   >
-                    {/* Avatar */}
+                    {/* Item Thumbnail with Partner Avatar Overlay */}
                     <div className="relative shrink-0">
-                      <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-sm font-bold text-white shadow-sm ring-2 ring-white">
-                        {room.partner.avatarUrl ? (
-                          <img
-                            src={room.partner.avatarUrl}
-                            alt={room.partner.username}
-                            className="h-full w-full object-cover"
+                      <div className="relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm">
+                        {room.order?.itemImageUrl ? (
+                          <Image
+                            src={room.order.itemImageUrl}
+                            alt={room.order.itemName || "รูปสินค้า"}
+                            fill
+                            sizes="56px"
+                            className="object-cover"
+                            unoptimized={true}
                           />
                         ) : (
-                          <span>{partnerInitial}</span>
+                          <Package className="h-6 w-6 text-slate-400" />
+                        )}
+                      </div>
+
+                      {/* Partner Avatar Badge */}
+                      <div className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-slate-200 shadow-sm">
+                        {room.partner?.avatarUrl ? (
+                          <Image
+                            src={room.partner.avatarUrl}
+                            alt={room.partner.username || "อวตาร"}
+                            fill
+                            sizes="24px"
+                            className="object-cover"
+                            unoptimized={true}
+                          />
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-600">
+                            {room.partner?.username?.[0]?.toUpperCase() || "U"}
+                          </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Info */}
                     <div className="min-w-0 flex-1">
+                      {/* Product Name & Status */}
                       <div className="flex items-center justify-between gap-1">
-                        <span className="truncate font-semibold text-slate-900">
-                          {room.partner.username}
+                        <span className="truncate text-sm font-bold text-slate-900">
+                          {room.order?.itemName || room.partner?.username || "การสนทนา"}
                         </span>
                         <span className="shrink-0 text-[11px] text-slate-400">
                           {formatChatTime(room.updatedAt)}
                         </span>
                       </div>
 
-                      <div className="mt-0.5 flex items-center justify-between gap-2">
+                      {/* Partner & Contextual Role */}
+                      <div className="mt-0.5 flex items-center justify-between gap-1">
+                        <span className="truncate text-xs font-medium text-slate-600">
+                          {room.partner?.role}: {room.partner?.username}
+                        </span>
+                        {room.order?.status && (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${statusMeta.badgeCls}`}
+                          >
+                            {room.isClosed && <Lock className="h-2.5 w-2.5" />}
+                            {statusMeta.label}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Last Message Preview & Unread Badge */}
+                      <div className="mt-1 flex items-center justify-between gap-2">
                         <p className="truncate text-xs text-slate-500">
                           {room.lastMessage || (
                             <span className="italic text-slate-400">
@@ -534,7 +660,6 @@ function ChatContent() {
                           )}
                         </p>
 
-                        {/* Unread badge */}
                         {room.unreadCount > 0 && (
                           <span className="flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white shadow-sm">
                             {room.unreadCount}
@@ -549,95 +674,193 @@ function ChatContent() {
           </div>
         </div>
 
-        {/* ========================================================================= */}
-        {/* RIGHT COLUMN: Active Chat Feed */}
-        {/* ========================================================================= */}
+        {/* RIGHT COLUMN: หน้าต่างสนทนาของออเดอร์ */}
         <div
-          className={`flex h-full flex-1 flex-col bg-slate-50/50 ${
-            !selectedRoomId ? "hidden md:flex" : "flex"
-          }`}
+          className={`flex h-full flex-1 flex-col bg-slate-50/50 ${!selectedRoomId ? "hidden md:flex" : "flex"}`}
         >
           {activeRoom ? (
             <>
-              {/* Chat Header */}
-              <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm lg:px-6">
-                <div className="flex items-center gap-3">
-                  {/* Mobile Back Button */}
+              {/* Header */}
+              <div className="flex h-20 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm lg:px-6">
+                <div className="flex items-center gap-3 min-w-0">
                   <button
                     onClick={() => setSelectedRoomId(null)}
-                    className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 md:hidden"
                   >
                     <ArrowLeft className="h-5 w-5" />
                   </button>
 
-                  {/* Partner Avatar (Clickable to Profile) */}
-                  <Link
-                    href={`/user/${activeRoom.partner.id}?from=chat`}
-                    title="ดูโปรไฟล์ผู้ใช้งาน"
-                    className="group relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-sm font-bold text-white shadow-sm ring-2 ring-transparent transition hover:ring-[#3f6593]"
-                  >
-                    {activeRoom.partner.avatarUrl ? (
-                      <img
-                        src={activeRoom.partner.avatarUrl}
-                        alt={activeRoom.partner.username}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <span>
-                        {activeRoom.partner.username
-                          ? activeRoom.partner.username[0].toUpperCase()
-                          : "U"}
-                      </span>
-                    )}
-                  </Link>
-
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/user/${activeRoom.partner.id}?from=chat`}
-                        className="font-bold text-slate-900 transition hover:text-[#1b3554] hover:underline"
-                      >
-                        {activeRoom.partner.username}
-                      </Link>
-                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                        {activeRoom.partner.role}
-                      </span>
+                  {/* Thumbnail */}
+                  {activeRoom.order ? (
+                    <Link
+                      href={`/products/${activeRoom.order.itemId}`}
+                      className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm transition hover:ring-2 hover:ring-[#3f6593]"
+                      title="ดูหน้าสินค้า"
+                    >
+                      {activeRoom.order.itemImageUrl ? (
+                        <Image
+                          src={activeRoom.order.itemImageUrl}
+                          alt={activeRoom.order.itemName}
+                          fill
+                          sizes="48px"
+                          className="object-cover"
+                          unoptimized={true}
+                        />
+                      ) : (
+                        <Package className="h-6 w-6 text-slate-400" />
+                      )}
+                    </Link>
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-100 shadow-sm">
+                      <User className="h-6 w-6 text-slate-400" />
                     </div>
-                    <span className="text-[11px] text-emerald-600">
-                      ● บัญชีใช้งาน
-                    </span>
+                  )}
+
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {activeRoom.order ? (
+                        <Link
+                          href={`/products/${activeRoom.order.itemId}`}
+                          className="truncate text-sm sm:text-base font-bold text-slate-900 transition hover:text-[#1b3554] hover:underline"
+                        >
+                          {activeRoom.order.itemName}
+                        </Link>
+                      ) : (
+                        <span className="truncate text-sm sm:text-base font-bold text-slate-900">
+                          {activeRoom.partner?.username || "การสนทนา"}
+                        </span>
+                      )}
+
+                      {activeRoom.order?.status && (() => {
+                        const statusMeta =
+                          ORDER_STATUS_CONFIG[activeRoom.order.status] || {
+                            label: activeRoom.order.status,
+                            badgeCls:
+                              "bg-slate-100 text-slate-700 border-slate-200",
+                          };
+                        return (
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${statusMeta.badgeCls}`}
+                          >
+                            {activeRoom.isClosed && (
+                              <Lock className="h-2.5 w-2.5" />
+                            )}
+                            {statusMeta.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5 flex-wrap">
+                      <Link
+                        href={`/user/${activeRoom.partner?.id}?from=chat`}
+                        className="font-medium text-slate-700 hover:underline flex items-center gap-1"
+                      >
+                        <span>{activeRoom.partner?.role}:</span>
+                        <span className="text-[#1b3554] font-semibold">
+                          {activeRoom.partner?.username}
+                        </span>
+                      </Link>
+
+                      {activeRoom.order?.startDate && activeRoom.order?.endDate && (
+                        <>
+                          <span className="text-slate-300">•</span>
+                          <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                            <Calendar className="h-3 w-3" />
+                            {formatOrderDate(activeRoom.order.startDate)} -{" "}
+                            {formatOrderDate(activeRoom.order.endDate)}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* View Profile Action Button */}
-                <Link
-                  href={`/user/${activeRoom.partner.id}?from=chat`}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554] active:scale-95"
-                >
-                  <User className="h-3.5 w-3.5 text-[#3f6593]" />
-                  <span>ดูโปรไฟล์</span>
-                </Link>
+                {/* Header Action Buttons */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {activeRoom.orderId && (
+                    <Link
+                      href={`/dashboard/${currentUserId || activeRoom.partner?.id}/${
+                        activeRoom.myRole === "renter" ? "rent" : "lend"
+                      }/${activeRoom.orderId}`}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554] active:scale-95"
+                      title="ดูรายละเอียดออเดอร์"
+                    >
+                      <Package className="h-3.5 w-3.5 text-[#3f6593]" />
+                      <span className="hidden sm:inline">ดูรายละเอียดออเดอร์</span>
+                      <ExternalLink className="h-3 w-3 text-slate-400 sm:hidden" />
+                    </Link>
+                  )}
+
+                  <Link
+                    href={`/user/${activeRoom.partner?.id}?from=chat`}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554] active:scale-95"
+                    title="ดูโปรไฟล์คู่สนทนา"
+                  >
+                    <User className="h-3.5 w-3.5 text-slate-500" />
+                    <span className="hidden md:inline">โปรไฟล์</span>
+                  </Link>
+                </div>
               </div>
 
-              {/* Message Feed Container (Self-contained scroll) */}
+              {/* Messages Body */}
               <div
                 ref={messagesContainerRef}
                 className="flex-1 overflow-y-auto p-4 space-y-4 lg:p-6"
               >
+                {/* Order Summary Card Banner */}
+                {activeRoom.order && activeRoom.orderId && (
+                  <div className="mx-auto max-w-lg rounded-2xl border border-slate-200/90 bg-white/95 p-3.5 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                        {activeRoom.order.itemImageUrl ? (
+                          <Image
+                            src={activeRoom.order.itemImageUrl}
+                            alt={activeRoom.order.itemName}
+                            fill
+                            sizes="48px"
+                            className="object-cover"
+                            unoptimized={true}
+                          />
+                        ) : (
+                          <Package className="h-5 w-5 text-slate-400" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1 text-xs">
+                        <p className="font-bold text-slate-900 truncate">
+                          {activeRoom.order.itemName}
+                        </p>
+                        <p className="text-slate-500 mt-0.5">
+                          รหัสคำสั่งเช่า: #{activeRoom.orderId.slice(0, 8)}
+                        </p>
+                        {activeRoom.order.startDate && activeRoom.order.endDate && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[11px] text-slate-500">
+                              ช่วงเวลา: {formatOrderDate(activeRoom.order.startDate)} -{" "}
+                              {formatOrderDate(activeRoom.order.endDate)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {isLoadingMessages ? (
-                  <div className="flex h-full items-center justify-center text-slate-400">
+                  <div className="flex h-40 items-center justify-center text-slate-400">
                     <Loader2 className="h-7 w-7 animate-spin text-[#3f6593]" />
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="flex h-full flex-col items-center justify-center text-center">
+                  <div className="flex h-56 flex-col items-center justify-center text-center">
                     <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-[#3f6593] shadow-sm ring-1 ring-slate-200/70">
                       <MessageCircle className="h-7 w-7" />
                     </div>
                     <h3 className="mt-3 text-base font-semibold text-slate-800">
-                      เริ่มการสนทนากับ {activeRoom.partner.username}
+                      เริ่มการสนทนา
                     </h3>
                     <p className="mt-1 max-w-sm text-xs text-slate-500">
-                      พิมพ์ข้อความด้านล่างเพื่อสอบถามรายละเอียด การนัดรับ หรือข้อมูลอุปกรณ์ก่อนการเช่า
+                      ประสานงานเรื่องการนัดรับ-ส่งมอบ วันเวลา และสถานที่กับ {activeRoom.partner?.username}
                     </p>
                   </div>
                 ) : (
@@ -664,16 +887,19 @@ function ChatContent() {
                           }`}
                         >
                           {!msg.isMe && (
-                            <div className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-300 text-[10px] font-bold text-slate-700">
-                              {activeRoom.partner.avatarUrl ? (
-                                <img
+                            <div className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-300 text-[10px] font-bold text-slate-700">
+                              {activeRoom.partner?.avatarUrl ? (
+                                <Image
                                   src={activeRoom.partner.avatarUrl}
-                                  alt={activeRoom.partner.username}
-                                  className="h-full w-full object-cover"
+                                  alt={activeRoom.partner.username || "อวตารผู้สนทนา"}
+                                  fill
+                                  sizes="28px"
+                                  className="object-cover"
+                                  unoptimized={true}
                                 />
                               ) : (
                                 <span>
-                                  {activeRoom.partner.username[0]?.toUpperCase() ||
+                                  {activeRoom.partner?.username?.[0]?.toUpperCase() ||
                                     "U"}
                                 </span>
                               )}
@@ -714,163 +940,79 @@ function ChatContent() {
                 )}
               </div>
 
-              {/* Input Area */}
+              {/* Message Input Footer / Locked Notice */}
               <div className="border-t border-slate-200 bg-white p-3 sm:p-4">
-                <form
-                  onSubmit={handleSendMessage}
-                  className="flex items-center gap-2"
-                >
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    placeholder="พิมพ์ข้อความที่ต้องการสอบถาม..."
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    className="h-11 flex-1 rounded-full border border-slate-200 bg-slate-50/70 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#3f6593] focus:bg-white focus:ring-4 focus:ring-[#c0e6fd]/40"
-                  />
-
-                  <button
-                    type="submit"
-                    disabled={!inputText.trim() || isSending}
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#1b3554] to-[#3f6593] text-white shadow-md shadow-[#1b3554]/20 transition hover:from-[#000f22] hover:to-[#1b3554] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                {activeRoom.isClosed ? (
+                  <div className="flex items-center justify-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-100/90 py-3.5 px-4 text-xs font-medium text-slate-500 shadow-sm">
+                    <Lock className="h-4 w-4 text-slate-400 shrink-0" />
+                    <span>
+                      การเช่านี้สิ้นสุดแล้ว ไม่สามารถส่งข้อความใหม่ได้
+                      (สามารถดูประวัติการสนทนาย้อนหลังได้)
+                    </span>
+                  </div>
+                ) : (
+                  <form
+                    onSubmit={handleSendMessage}
+                    className="flex items-center gap-2"
                   >
-                    {isSending ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4 -translate-x-0.5" />
-                    )}
-                  </button>
-                </form>
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      placeholder="พิมพ์ข้อความที่นี่..."
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      className="h-11 flex-1 rounded-full border border-slate-200 bg-slate-50/70 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-[#3f6593] focus:bg-white focus:ring-4 focus:ring-[#c0e6fd]/40"
+                    />
+
+                    <button
+                      type="submit"
+                      disabled={!inputText.trim() || isSending}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#1b3554] to-[#3f6593] text-white shadow-md shadow-[#1b3554]/20 transition hover:from-[#000f22] hover:to-[#1b3554] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {isSending ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4 -translate-x-0.5" />
+                      )}
+                    </button>
+                  </form>
+                )}
               </div>
             </>
           ) : (
-            /* Empty State when no room is selected */
             <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-white shadow-sm ring-1 ring-slate-200">
+              <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-white shadow-sm ring-1 border border-slate-200">
                 <MessageCircle className="h-10 w-10 text-[#3f6593]" />
               </div>
               <h2 className="mt-4 text-lg font-bold text-slate-800">
-                ยินดีต้อนรับสู่ระบบแชท ChaoChao
+                ระบบแชท ChaoChao
               </h2>
               <p className="mt-1.5 max-w-md text-sm text-slate-500">
-                เลือกคู่สนทนาจากรายการทางซ้าย หรือเริ่มแชทใหม่เพื่อสอบถามข้อมูลอุปกรณ์ สภาพของ และการนัดหมายก่อนเริ่มเช่า
+                เลือกรายการสนทนาจากแถบด้านซ้าย เพื่อเริ่มการพูดคุยและประสานงาน
               </p>
-              <button
-                onClick={() => {
-                  setIsNewChatModalOpen(true);
-                  setUserQuery("");
-                }}
-                className="mt-5 flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#1b3554] to-[#3f6593] px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#1b3554]/20 transition hover:from-[#000f22] hover:to-[#1b3554]"
-              >
-                <Plus className="h-4 w-4" />
-                <span>เริ่มแชทใหม่</span>
-              </button>
+              <div className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3.5 py-1.5 text-xs text-slate-600">
+                <span>⚡ ประวัติแชทเก็บเป็นไฟล์ JSON บน Supabase Storage พร้อม Realtime ทันที</span>
+              </div>
             </div>
           )}
         </div>
       </div>
-
-      {/* ========================================================================= */}
-      {/* MODAL: Start New Chat by Searching Username */}
-      {/* ========================================================================= */}
-      {isNewChatModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#c0e6fd]/30 text-[#1b3554]">
-                  <User className="h-4 w-4" />
-                </div>
-                <h3 className="text-base font-bold text-[#000f22]">
-                  เริ่มบทสนทนาใหม่
-                </h3>
-              </div>
-              <button
-                onClick={() => setIsNewChatModalOpen(false)}
-                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Search Input */}
-            <div className="relative mt-4">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="พิมพ์ชื่อผู้ใช้ที่ต้องการค้นหา..."
-                value={userQuery}
-                onChange={(e) => setUserQuery(e.target.value)}
-                autoFocus
-                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 outline-none transition focus:border-[#3f6593] focus:bg-white focus:ring-2 focus:ring-[#c0e6fd]/50"
-              />
-            </div>
-
-            {/* Modal Search Results */}
-            <div className="mt-4 max-h-60 overflow-y-auto divide-y divide-slate-100">
-              {isSearchingUsers ? (
-                <div className="flex h-32 items-center justify-center gap-2 text-slate-400">
-                  <Loader2 className="h-5 w-5 animate-spin text-[#3f6593]" />
-                  <span className="text-xs">กำลังค้นหาผู้ใช้...</span>
-                </div>
-              ) : searchResults.length === 0 ? (
-                <div className="flex h-32 flex-col items-center justify-center text-center text-slate-400">
-                  <User className="h-8 w-8 text-slate-300" />
-                  <span className="mt-2 text-xs">
-                    {userQuery ? `ไม่พบผู้ใช้ชื่อ "${userQuery}"` : "พิมพ์ชื่อผู้ใช้เพื่อค้นหา"}
-                  </span>
-                </div>
-              ) : (
-                searchResults.map((user) => (
-                  <button
-                    key={user.id}
-                    onClick={() => handleStartChatWithUser(user)}
-                    className="flex w-full items-center gap-3 p-3 text-left transition hover:bg-sky-50 rounded-xl"
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-xs font-bold text-white shadow-sm">
-                      {user.avatarUrl ? (
-                        <img
-                          src={user.avatarUrl}
-                          alt={user.username}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <span>{user.username[0]?.toUpperCase() || "U"}</span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">
-                        {user.username}
-                      </p>
-                      <span className="text-[11px] text-slate-500">
-                        {user.role}
-                      </span>
-                    </div>
-                    <span className="rounded-lg bg-[#c0e6fd]/30 px-2.5 py-1 text-xs font-medium text-[#1b3554]">
-                      แชท
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
 export default function ChatPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex h-[calc(100vh-80px)] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-[#3f6593]" />
-        </div>
-      }
-    >
-      <ChatContent />
-    </Suspense>
+    <ToastProvider>
+      <Suspense
+        fallback={
+          <div className="flex h-[calc(100vh-80px)] items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-[#3f6593]" />
+          </div>
+        }
+      >
+        <ChatContent />
+      </Suspense>
+    </ToastProvider>
   );
 }
