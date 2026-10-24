@@ -88,6 +88,7 @@ async function getFeaturedProducts(): Promise<Product[]> {
           avatar_url
         )
       `)
+      .neq("status", "inactive")
       .order("created_at", { ascending: false })
       .limit(8);
 
@@ -153,7 +154,8 @@ async function getPopularCategories() {
 
     const { data: dbItems } = await admin
       .from("item")
-      .select("category_id");
+      .select("category_id")
+      .neq("status", "inactive");
 
     const categoryItemCounts: Record<string, number> = {};
     (dbItems || []).forEach((it: any) => {

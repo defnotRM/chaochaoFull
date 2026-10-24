@@ -80,6 +80,8 @@ export function matchesNonCategoryFilters(
   criteria: ProductFilterCriteria,
 ) {
   if (criteria.hasInvalidRange) return false;
+  // สินค้าที่ผู้ให้เช่าซ่อนไว้ (inactive) ต้องไม่แสดงในหน้าค้นหาสาธารณะ
+  if (product.status === "inactive") return false;
 
   // ค้นหาตามคำค้นหา (ชื่อสินค้า, รายละเอียด, หมวดหมู่)
   const matchesSearch =

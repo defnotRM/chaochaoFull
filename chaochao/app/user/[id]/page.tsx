@@ -9,6 +9,9 @@ import {
   Calendar,
   ArrowLeft,
   Loader2,
+  BadgeCheck,
+  Clock,
+  Star,
 } from "lucide-react";
 
 interface PublicUserProfile {
@@ -20,6 +23,9 @@ interface PublicUserProfile {
   role: string;
   isLender: boolean;
   isRenter: boolean;
+  isVerified?: boolean;
+  rating?: number;
+  reviewCount?: number;
   createdAt: string;
 }
 
@@ -160,19 +166,42 @@ function UserProfileContent({ userId }: { userId: string }) {
                     <span className="rounded-full border border-[#80aad3]/40 bg-[#c0e6fd]/40 px-3 py-0.5 text-xs font-semibold text-[#1b3554] shadow-2xs">
                       {user.role}
                     </span>
+                    {user.isVerified ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                        <BadgeCheck className="h-3.5 w-3.5 text-emerald-600" />
+                        ยืนยันตัวตนแล้ว
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                        <Clock className="h-3.5 w-3.5 text-amber-600" />
+                        รอยืนยันตัวตน
+                      </span>
+                    )}
                   </div>
 
-                  <p className="mt-1 flex items-center gap-1 text-xs text-slate-400">
-                    <Calendar className="h-3.5 w-3.5" />
-                    <span>
-                      สมาชิกตั้งแต่{" "}
-                      {new Date(user.createdAt).toLocaleDateString("th-TH", {
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                      })}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span className="inline-flex items-center gap-1">
+                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                      <strong className="font-semibold text-slate-700">
+                        {(user.rating ?? 0).toFixed(1)}
+                      </strong>
+                      <span className="text-slate-400">
+                        คะแนนรีวิวเฉลี่ย ({user.reviewCount ?? 0} รีวิว)
+                      </span>
                     </span>
-                  </p>
+                    <span className="text-slate-300">•</span>
+                    <span className="inline-flex items-center gap-1 text-slate-400">
+                      <Calendar className="h-3.5 w-3.5" />
+                      <span>
+                        สมาชิกตั้งแต่{" "}
+                        {new Date(user.createdAt).toLocaleDateString("th-TH", {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </span>
+                  </div>
                 </div>
               </div>
 

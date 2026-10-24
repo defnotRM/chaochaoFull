@@ -21,7 +21,7 @@ export async function GET(
     // 1. Fetch user profile
     const { data: userRow, error: userError } = await admin
       .from("useraccount")
-      .select("user_id, username, bio, avatar_url, banner_url, status, updated_at, created_at")
+      .select("user_id, username, bio, avatar_url, banner_url, status, updated_at, created_at, identity_verification_status")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -60,6 +60,7 @@ export async function GET(
             status: "Active",
             updated_at: au.updated_at || new Date().toISOString(),
             created_at: au.created_at || new Date().toISOString(),
+            identity_verification_status: "pending",
           };
 
           const uRole =
@@ -149,24 +150,43 @@ export async function GET(
       ? "ผู้ให้เช่า"
       : "ผู้เช่า";
 
-    // 3. Fetch primary images for items
+    // 3. Fetch primary images & lender average rating for items
     const itemIds = (items || []).map((it) => it.item_id);
     let imagesMap = new Map<string, string>();
+    let averageRating = 0;
+    let reviewCount = 0;
 
     if (itemIds.length > 0) {
-      const { data: images } = await admin
-        .from("itemimage")
-        .select("item_id, image_url, is_primary")
-        .in("item_id", itemIds);
+      const [{ data: images }, { data: ownerReviews }] = await Promise.all([
+        admin
+          .from("itemimage")
+          .select("item_id, image_url, is_primary")
+          .in("item_id", itemIds),
+        admin
+          .from("review")
+          .select("rating, order:order_id!inner ( item_id )")
+          .in("order.item_id", itemIds),
+      ]);
 
       (images || []).forEach((img) => {
         if (img.is_primary || !imagesMap.has(img.item_id)) {
           imagesMap.set(img.item_id, img.image_url);
         }
       });
+
+      const revRows = (ownerReviews || []) as Array<{ rating: number }>;
+      reviewCount = revRows.length;
+      averageRating =
+        revRows.length > 0
+          ? revRows.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) /
+            revRows.length
+          : 0;
     }
 
-    const formattedItems = (items || []).map((it) => ({
+    // ซ่อนสินค้าที่ผู้ให้เช่าตั้งค่าซ่อนไว้ (status === 'inactive') จากหน้าโปรไฟล์สาธารณะ (FR-15)
+    const visibleItems = (items || []).filter((it) => it.status !== "inactive");
+
+    const formattedItems = visibleItems.map((it) => ({
       id: it.item_id,
       name: it.item_name,
       description: it.description || "",
@@ -188,6 +208,9 @@ export async function GET(
           role: roleLabel,
           isLender,
           isRenter,
+          isVerified: user.identity_verification_status === "verified",
+          rating: averageRating,
+          reviewCount,
           createdAt: user.created_at,
         },
         items: formattedItems,
