@@ -26,6 +26,8 @@ export const updateRentalOrderStatusSchema = z.object({
 
 export const settleRentalOrderSchema = z.object({
   damageCost: z.number().min(0).optional().default(0),
+  damageFee: z.number().min(0).optional().default(0),
+  lateFee: z.number().min(0).optional().default(0),
 });
 
 export const uploadEvidenceSchema = z.object({
