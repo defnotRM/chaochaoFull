@@ -120,6 +120,62 @@ function formatOrderDate(dateString?: string) {
   });
 }
 
+/**
+ * ผสานรายการข้อความฝั่ง Client แบบไม่ทำข้อความที่เพิ่งส่งหาย (Monotonic Merge)
+ */
+function mergeClientMessages(
+  prevMessages: MessageItem[],
+  incomingMessages: MessageItem[],
+  roomId: string,
+  removedTempIds: Set<string>,
+): MessageItem[] {
+  const prevForRoom = prevMessages.filter((m) => m.roomId === roomId);
+  const confirmedMap = new Map<string, MessageItem>();
+
+  // 1. นำข้อความที่ยืนยันแล้วจาก prevForRoom ตั้งต้นไว้ก่อน (กันกรณี GET ที่เริ่มก่อน POST จะทับข้อความใหม่หาย)
+  for (const m of prevForRoom) {
+    if (!m.id.startsWith("temp-")) {
+      confirmedMap.set(m.id, m);
+    }
+  }
+
+  // 2. ผสานข้อความที่มาจาก Server (อัปเดตสถานะ isRead และเพิ่มข้อความใหม่)
+  for (const m of incomingMessages) {
+    const existing = confirmedMap.get(m.id);
+    if (existing) {
+      confirmedMap.set(m.id, {
+        ...existing,
+        ...m,
+        isRead: Boolean(existing.isRead || m.isRead),
+      });
+    } else {
+      confirmedMap.set(m.id, m);
+    }
+  }
+
+  const confirmedList = Array.from(confirmedMap.values());
+
+  // 3. เก็บข้อความ Optimistic (temp-*) ที่กำลังส่งอยู่และยังไม่ได้ถูกแทนที่
+  const activeOptimistic = prevForRoom.filter((p) => {
+    if (!p.id.startsWith("temp-")) return false;
+    if (removedTempIds.has(p.id)) return false;
+
+    const alreadyInConfirmed = confirmedList.some(
+      (c) =>
+        c.isMe &&
+        c.content === p.content &&
+        Math.abs(
+          new Date(c.createdAt).getTime() - new Date(p.createdAt).getTime(),
+        ) < 15000,
+    );
+    return !alreadyInConfirmed;
+  });
+
+  return [...confirmedList, ...activeOptimistic].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
 function ChatContent() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -136,14 +192,16 @@ function ChatContent() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoadingRooms, setIsLoadingRooms] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [sendingCount, setSendingCount] = useState(0);
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const roomChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
+  const removedTempIdsRef = useRef<Set<string>>(new Set());
 
   const activeRoom = rooms.find((r) => r.id === selectedRoomId);
+  const isSending = sendingCount > 0;
 
   // โหลด user ปัจจุบัน
   useEffect(() => {
@@ -166,7 +224,9 @@ function ChatContent() {
 
   const fetchRooms = useCallback(async () => {
     try {
-      const res = await fetch("/api/chat/rooms", { cache: "no-store" });
+      const res = await fetch(`/api/chat/rooms?t=${Date.now()}`, {
+        cache: "no-store",
+      });
       if (res.status === 401) {
         setRooms([]);
         return [];
@@ -196,7 +256,9 @@ function ChatContent() {
 
       if (targetOrderIdParam) {
         // หาห้องของ orderId นี้
-        const match = loadedRooms.find((r: ChatRoom) => r.orderId === targetOrderIdParam);
+        const match = loadedRooms.find(
+          (r: ChatRoom) => r.orderId === targetOrderIdParam,
+        );
         if (match) {
           setSelectedRoomId(match.id);
         } else {
@@ -236,39 +298,30 @@ function ChatContent() {
     async (roomId: string, silent = false, autoScroll = false) => {
       if (!silent) setIsLoadingMessages(true);
       try {
-        const res = await fetch(`/api/chat/messages?roomId=${roomId}`, {
-          cache: "no-store",
-        });
+        const res = await fetch(
+          `/api/chat/messages?roomId=${roomId}&t=${Date.now()}`,
+          {
+            cache: "no-store",
+          },
+        );
         if (res.ok) {
           const data = await res.json();
           const incomingMessages: MessageItem[] = data.messages || [];
 
           setMessages((prev) => {
-            // ดึง optimistic messages ที่กำลังส่งอยู่ (temp-*)
-            const pendingOptimistic = prev.filter((m) => m.id.startsWith("temp-"));
-
-            if (pendingOptimistic.length === 0) {
-              if (
-                prev.length === incomingMessages.length &&
-                JSON.stringify(prev) === JSON.stringify(incomingMessages)
-              ) {
-                return prev;
-              }
-              return incomingMessages;
-            }
-
-            // ถ้ามี optimistic messages ให้คงไว้ ไม่ให้ถูก silent poll เขียนทับจนหาย
-            const activePending = pendingOptimistic.filter(
-              (p) =>
-                !incomingMessages.some(
-                  (m) =>
-                    m.content === p.content &&
-                    m.isMe &&
-                    Math.abs(new Date(m.createdAt).getTime() - new Date(p.createdAt).getTime()) < 15000,
-                ),
+            const merged = mergeClientMessages(
+              prev,
+              incomingMessages,
+              roomId,
+              removedTempIdsRef.current,
             );
-
-            return [...incomingMessages, ...activePending];
+            if (
+              prev.length === merged.length &&
+              JSON.stringify(prev) === JSON.stringify(merged)
+            ) {
+              return prev;
+            }
+            return merged;
           });
 
           setRooms((prev) =>
@@ -325,12 +378,15 @@ function ChatContent() {
 
                 // หากเป็นข้อความจากตัวเราเองที่ broadcast กลับมา และมี optimistic temp ค้างอยู่ ให้แทนที่
                 if (incomingMsg.senderId === currentUserId) {
-                  const hasTemp = prev.some(
-                    (m) => m.id.startsWith("temp-") && m.content === incomingMsg.content,
+                  const matchingTemp = prev.find(
+                    (m) =>
+                      m.id.startsWith("temp-") &&
+                      m.content === incomingMsg.content,
                   );
-                  if (hasTemp) {
+                  if (matchingTemp) {
+                    removedTempIdsRef.current.add(matchingTemp.id);
                     return prev.map((m) =>
-                      m.id.startsWith("temp-") && m.content === incomingMsg.content
+                      m.id === matchingTemp.id
                         ? { ...incomingMsg, isMe: true }
                         : m,
                     );
@@ -410,43 +466,55 @@ function ChatContent() {
       roomChannelRef.current = null;
       globalChannelRef.current = null;
     };
-  }, [selectedRoomId, currentUserId, fetchRooms, fetchMessages, scrollToBottom]);
+  }, [
+    selectedRoomId,
+    currentUserId,
+    fetchRooms,
+    fetchMessages,
+    scrollToBottom,
+  ]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (
-      !selectedRoomId ||
-      !inputText.trim() ||
-      isSending ||
-      activeRoom?.isClosed
-    )
-      return;
+    if (!selectedRoomId || !inputText.trim() || activeRoom?.isClosed) return;
 
+    const targetRoomId = selectedRoomId;
     const content = inputText.trim();
-    setInputText("");
-    setIsSending(true);
+    const nowIso = new Date().toISOString();
 
-    const tempId = `temp-${Date.now()}`;
+    setInputText("");
+    setSendingCount((c) => c + 1);
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const optimisticMsg: MessageItem = {
       id: tempId,
-      roomId: selectedRoomId,
+      roomId: targetRoomId,
       senderId: currentUserId || "me",
       isMe: true,
       type: "text",
       content,
       isRead: false,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
     };
 
+    // แสดงข้อความขึ้นหน้าจอทันที (Optimistic UI)
     setMessages((prev) => [...prev, optimisticMsg]);
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.id === targetRoomId
+          ? { ...r, lastMessage: content, updatedAt: nowIso }
+          : r,
+      ),
+    );
     setTimeout(() => scrollToBottom(true), 20);
+    inputRef.current?.focus();
 
     try {
       const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          roomId: selectedRoomId,
+          roomId: targetRoomId,
           content,
           type: "text",
         }),
@@ -459,14 +527,22 @@ function ChatContent() {
           isMe: true,
         };
 
+        removedTempIdsRef.current.add(tempId);
+
         setMessages((prev) => {
-          if (prev.some((m) => m.id === tempId)) {
-            return prev.map((m) => (m.id === tempId ? serverMsg : m));
+          const replaced = prev.some((m) => m.id === tempId)
+            ? prev.map((m) => (m.id === tempId ? serverMsg : m))
+            : [...prev, serverMsg];
+
+          // Deduplicate by id
+          const uniqueMap = new Map<string, MessageItem>();
+          for (const m of replaced) {
+            uniqueMap.set(m.id, m);
           }
-          if (!prev.some((m) => m.id === serverMsg.id)) {
-            return [...prev, serverMsg];
-          }
-          return prev;
+          return Array.from(uniqueMap.values()).sort(
+            (a, b) =>
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+          );
         });
 
         void fetchRooms();
@@ -485,20 +561,26 @@ function ChatContent() {
           globalChannelRef.current.send({
             type: "broadcast",
             event: "room_updated",
-            payload: { roomId: selectedRoomId },
+            payload: { roomId: targetRoomId },
           });
         }
       } else {
         const errData = await res.json().catch(() => ({}));
+        removedTempIdsRef.current.add(tempId);
         setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        toast.error(errData.message || "ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง");
+        setInputText((curr) => curr || content);
+        toast.error(
+          errData.message || "ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง",
+        );
       }
     } catch (err) {
       console.error("Error sending message:", err);
+      removedTempIdsRef.current.add(tempId);
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setInputText((curr) => curr || content);
       toast.error("เกิดข้อผิดพลาดในการเชื่อมต่อ กรุณาลองใหม่อีกครั้ง");
     } finally {
-      setIsSending(false);
+      setSendingCount((c) => Math.max(0, c - 1));
       inputRef.current?.focus();
     }
   };
@@ -966,7 +1048,7 @@ function ChatContent() {
 
                     <button
                       type="submit"
-                      disabled={!inputText.trim() || isSending}
+                      disabled={!inputText.trim()}
                       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#1b3554] to-[#3f6593] text-white shadow-md shadow-[#1b3554]/20 transition hover:from-[#000f22] hover:to-[#1b3554] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isSending ? (
