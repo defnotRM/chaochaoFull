@@ -257,11 +257,11 @@ export async function getProductById(id: string): Promise<Product | null> {
         .select("user_id, firstname, lastname, username, avatar_url, updated_at, status, created_at")
         .eq("user_id", it.user_id)
         .maybeSingle(),
-      // รีวิวของชิ้นนี้ + ชื่อผู้รีวิว (renter ผ่าน rentalorder.user_id)
+      // รีวิวของชิ้นนี้ + ชื่อผู้รีวิว (renter ผ่าน rentalorder.user_id) + รูปประกอบรีวิว
       admin
         .from("review")
         .select(
-          "rating, comment, created_at, order:order_id!inner ( item_id, renter:user_id ( firstname, lastname, username ) )"
+          "review_id, rating, comment, created_at, reviewimage ( image_url, sequence ), order:order_id!inner ( item_id, renter:user_id ( firstname, lastname, username, avatar_url ) )"
         )
         .eq("order.item_id", id)
         .order("created_at", { ascending: false }),
@@ -285,10 +285,19 @@ export async function getProductById(id: string): Promise<Product | null> {
 
   const reviews: ProductReview[] = (
     (reviewRes.data || []) as unknown as Array<{
+      review_id?: string;
       rating: number;
       comment: string | null;
       created_at: string;
-      order: { renter: { firstname: string | null; lastname: string | null; username: string | null } | null } | null;
+      reviewimage?: Array<{ image_url: string; sequence: number | null }> | null;
+      order: {
+        renter: {
+          firstname: string | null;
+          lastname: string | null;
+          username: string | null;
+          avatar_url?: string | null;
+        } | null;
+      } | null;
     }>
   ).map((r, index) => {
     const renter = r.order?.renter;
@@ -296,11 +305,16 @@ export async function getProductById(id: string): Promise<Product | null> {
       renter?.username ||
       [renter?.firstname, renter?.lastname].filter(Boolean).join(" ").trim() ||
       "ผู้เช่า";
+    const sortedReviewImages = [...(r.reviewimage || [])]
+      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+      .map((img) => img.image_url);
     return {
-      id: `${id}-review-${index}`,
+      id: r.review_id || `${id}-review-${index}`,
       reviewerName,
+      reviewerAvatarUrl: renter?.avatar_url || null,
       rating: toNumber(r.rating),
       comment: r.comment || "",
+      imageUrls: sortedReviewImages,
       createdAt: r.created_at,
     };
   });

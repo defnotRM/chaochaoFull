@@ -109,8 +109,10 @@ export interface ProductOwner {
 export interface ProductReview {
   id: string;
   reviewerName: string;
+  reviewerAvatarUrl?: string | null;
   rating: number;
   comment: string;
+  imageUrls?: string[];
   createdAt: string;
 }
 
