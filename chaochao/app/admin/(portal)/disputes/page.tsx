@@ -38,9 +38,7 @@ interface DisputeReport {
     | "pending_investigation"
     | "resolved_renter_fault"
     | "resolved_lender_fault"
-    | "dismissed"
-    | "resolved"
-    | string;
+    | "dismissed";
   verdict: string | null;
   damage_amount: number | null;
   created_at: string;
@@ -259,13 +257,7 @@ export default function AdminDisputesPage() {
     );
   });
 
-  const getReportTypeBadge = (typeName?: string, description?: string) => {
-    if (description?.startsWith("[ผู้ให้เช่ายกเลิกคำสั่งเช่า]")) {
-      return {
-        label: "ผู้ให้เช่ายกเลิกคำสั่งเช่า (FR-35)",
-        bg: "bg-rose-50 text-rose-800 border-rose-300 font-bold",
-      };
-    }
+  const getReportTypeBadge = (typeName?: string) => {
     switch (typeName) {
       case "damaged_item":
         return {
@@ -295,17 +287,7 @@ export default function AdminDisputesPage() {
     }
   };
 
-  const getStatusBadge = (status: string, description?: string) => {
-    if (
-      description?.startsWith("[ผู้ให้เช่ายกเลิกคำสั่งเช่า]") ||
-      status === "resolved"
-    ) {
-      return {
-        label: "คืนเงินผู้เช่าสำเร็จ (100%)",
-        bg: "bg-emerald-500/15 text-emerald-800",
-        dot: "bg-emerald-500",
-      };
-    }
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case "pending_investigation":
         return {
@@ -381,7 +363,7 @@ export default function AdminDisputesPage() {
 
       {/* Filter Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200/80 pb-4">
-        <div className="flex items-center gap-1 rounded-2xl bg-slate-100 p-1 flex-wrap">
+        <div className="flex items-center gap-1 rounded-2xl bg-slate-100 p-1">
           <button
             type="button"
             onClick={() => setStatusFilter("pending_investigation")}
@@ -392,17 +374,6 @@ export default function AdminDisputesPage() {
             }`}
           >
             รอการตัดสิน (Pending)
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter("lender_cancellation")}
-            className={`rounded-xl px-4 py-2 text-xs font-bold transition ${
-              statusFilter === "lender_cancellation"
-                ? "bg-white text-[#1b3554] shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            ยกเลิกโดยผู้ให้เช่า (FR-35)
           </button>
           <button
             type="button"
@@ -461,13 +432,9 @@ export default function AdminDisputesPage() {
         <div className="space-y-6">
           {filteredReports.map((report) => {
             const typeInfo = getReportTypeBadge(
-              report.rentalreporttype?.type_name,
-              report.description
+              report.rentalreporttype?.type_name
             );
-            const statusInfo = getStatusBadge(
-              report.status,
-              report.description
-            );
+            const statusInfo = getStatusBadge(report.status);
             const order = report.rentalorder;
             const isPending = report.status === "pending_investigation";
 
