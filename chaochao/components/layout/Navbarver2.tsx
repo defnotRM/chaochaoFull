@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import {
-  Heart,
   Menu,
   MessageCircle,
   X,
@@ -14,6 +13,7 @@ import {
   Globe,
 } from "lucide-react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import NotificationBell from "./NotificationBell";
 
 function Brand() {
   return (
@@ -85,7 +85,7 @@ export default function Navbarver2() {
         const data = await res.json();
         const totalUnread = (data.rooms || []).reduce(
           (sum: number, r: any) => sum + (r.unreadCount || 0),
-          0
+          0,
         );
         setUnreadCount(totalUnread);
       }
@@ -146,9 +146,18 @@ export default function Navbarver2() {
     }
   };
 
-  const dashboardLink = user?.id ? `/dashboard/${user.id}` : "/dashboard";
+  const dashboardLink =
+    user?.role === "admin"
+      ? "/admin"
+      : user?.id
+      ? `/dashboard/${user.id}`
+      : "/dashboard";
 
   const userInitial = user?.username ? user.username[0].toUpperCase() : "U";
+
+  if (pathname?.startsWith("/admin")) {
+    return null;
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
@@ -169,14 +178,6 @@ export default function Navbarver2() {
           </Link>
 
           <Link
-            href={user ? "/renter/favorites" : "/login?redirect=/renter/favorites"}
-            aria-label="รายการโปรด"
-            className="flex h-11 w-11 items-center justify-center rounded-full text-[#17326b] transition hover:bg-sky-50 focus-visible:outline-2 focus-visible:outline-sky-600"
-          >
-            <Heart aria-hidden="true" className="h-6 w-6" />
-          </Link>
-
-          <Link
             href={user ? "/chat" : "/login?redirect=/chat"}
             aria-label="ข้อความ"
             className="relative flex h-11 w-11 items-center justify-center rounded-full text-[#17326b] transition hover:bg-sky-50 focus-visible:outline-2 focus-visible:outline-sky-600"
@@ -188,6 +189,7 @@ export default function Navbarver2() {
               </span>
             )}
           </Link>
+          <NotificationBell userId={user?.id ?? null} />
           <span aria-hidden="true" className="mx-1 h-7 w-px bg-slate-200" />
 
           {user ? (
@@ -293,12 +295,7 @@ export default function Navbarver2() {
                 </span>
               )}
             </Link>
-            <Link
-              href={user ? "/renter/favorites" : "/login?redirect=/renter/favorites"}
-              className="flex h-11 w-11 items-center justify-center rounded-full text-[#17326b] transition hover:bg-sky-50 focus-visible:outline-2 focus-visible:outline-sky-600"
-            >
-              <Heart aria-hidden="true" className="h-6 w-6" />
-            </Link>
+            <NotificationBell userId={user?.id ?? null} />
 
             {/* Circular Profile Button for Mobile Top Bar (เฉพาะเมื่อ Logged In) */}
             {user && (

@@ -72,7 +72,11 @@ export async function GET(request: Request) {
       return {
         id: u.user_id,
         username: u.username,
-        avatarUrl: u.avatar_url ? `/api/avatar?id=${u.user_id}&v=${v}` : null,
+        avatarUrl: u.avatar_url
+          ? (u.avatar_url.startsWith("http")
+              ? u.avatar_url
+              : `/api/avatar?id=${u.user_id}&v=${v}`)
+          : null,
         role: roleLabel,
         status: u.status,
       };

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BOOKING_BLOCKING_STATUSES } from "@/lib/booking-statuses";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 
@@ -43,13 +44,13 @@ export async function POST(request: Request) {
     if (!itemId || !startDate || !endDate) {
       return NextResponse.json(
         { message: "ข้อมูลคำขอไม่ครบ (สินค้า/ช่วงวันที่)" },
-        { status: 400 }
+        { status: 400 },
       );
     }
     if (endDate < startDate) {
       return NextResponse.json(
         { message: "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -67,8 +68,11 @@ export async function POST(request: Request) {
         .eq("user_id", user.id);
 
       const roles = (userRoles || [])
-        .map((r: any) => r.role?.role_type)
-        .filter(Boolean);
+        .map((r: { role?: { role_type?: string } | { role_type?: string }[] | null }) => {
+          const item = Array.isArray(r.role) ? r.role[0] : r.role;
+          return item?.role_type;
+        })
+        .filter((r): r is string => Boolean(r));
 
       const isLenderOnly =
         roles.includes("lender") &&
@@ -77,19 +81,27 @@ export async function POST(request: Request) {
 
       if (isLenderOnly) {
         return NextResponse.json(
-          { message: "บัญชีของคุณเป็นผู้ให้เช่าเท่านั้น ไม่สามารถส่งคำขอเช่าได้" },
-          { status: 403 }
+          {
+            message:
+              "บัญชีของคุณเป็นผู้ให้เช่าเท่านั้น ไม่สามารถส่งคำขอเช่าได้",
+          },
+          { status: 403 },
         );
       }
     }
 
-    // Default to romanlnw68 if not logged in
-    const renterUserId = user?.id || "8a88d60a-e2cf-43a6-b4ea-baa9347bfee1";
+    if (!user?.id) {
+      return NextResponse.json(
+        { message: "กรุณาเข้าสู่ระบบก่อนทำการเช่าสินค้า" },
+        { status: 401 }
+      );
+    }
+    const renterUserId = user.id;
 
     // 2) ตรวจสินค้ามีจริงและพร้อมให้เช่า
     const { data: item, error: itemError } = await admin
       .from("item")
-      .select("item_id, status, rental_fee_per_day, deposit")
+      .select("item_id, user_id, status, rental_fee_per_day, deposit")
       .eq("item_id", itemId)
       .maybeSingle();
 
@@ -99,7 +111,7 @@ export async function POST(request: Request) {
     if (item.status !== "available") {
       return NextResponse.json(
         { message: "สินค้านี้ไม่พร้อมให้เช่าในขณะนี้" },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -118,8 +130,11 @@ export async function POST(request: Request) {
 
       if (!isWithinAvailability) {
         return NextResponse.json(
-          { message: "ช่วงเวลาที่คุณเลือกไม่อยู่ในขอบเขตวันที่ผู้ให้เช่าเปิดให้เช่า" },
-          { status: 400 }
+          {
+            message:
+              "ช่วงเวลาที่คุณเลือกไม่อยู่ในขอบเขตวันที่ผู้ให้เช่าเปิดให้เช่า",
+          },
+          { status: 400 },
         );
       }
     }
@@ -129,14 +144,17 @@ export async function POST(request: Request) {
       .from("rentalorder")
       .select("order_id, start_date, end_date")
       .eq("item_id", itemId)
-      .in("status", ["awaiting_payment", "paid", "item_sent", "item_received"])
+      .in("status", [...BOOKING_BLOCKING_STATUSES])
       .lte("start_date", endDate)
       .gte("end_date", startDate);
 
     if (overlappingOrders && overlappingOrders.length > 0) {
       return NextResponse.json(
-        { message: "ช่วงเวลาดังกล่าวมีรายการเช่าที่ได้รับการอนุมัติไปแล้ว กรุณาเลือกช่วงเวลาอื่น" },
-        { status: 409 }
+        {
+          message:
+            "ช่วงเวลาดังกล่าวมีรายการเช่าอื่นของสินค้านี้ที่ยังไม่เสร็จสิ้น (เช่น อนุมัติแล้ว กำลังเช่า หรือรอตัดสินข้อพิพาท) กรุณาเลือกช่วงเวลาอื่น",
+        },
+        { status: 409 },
       );
     }
 
@@ -149,10 +167,11 @@ export async function POST(request: Request) {
       const phone = renter?.phone?.trim() ?? "";
       const nationalId = renter?.nationalId?.trim() ?? "";
 
-      const updatePayload: Record<string, any> = {};
+      const updatePayload: Record<string, string> = {};
       if (firstName) updatePayload.firstname = firstName;
       if (lastName) updatePayload.lastname = lastName;
-      if (nationalId && NATIONAL_ID_RE.test(nationalId)) updatePayload.national_id = nationalId;
+      if (nationalId && NATIONAL_ID_RE.test(nationalId))
+        updatePayload.national_id = nationalId;
       if (email) updatePayload.email = email;
 
       if (Object.keys(updatePayload).length > 0) {
@@ -163,15 +182,17 @@ export async function POST(request: Request) {
       }
 
       if (phone) {
-        await admin.from("userphones").delete().eq("user_id", renterUserId);
-        await admin.from("userphones").insert({ user_id: renterUserId, phone });
+        await admin
+          .from("useraccount")
+          .update({ phone })
+          .eq("user_id", renterUserId);
       }
     }
 
     // คำนวณราคากรณีไม่ได้ส่งมา
     const finalFee = rentalFee ?? item.rental_fee_per_day;
     const finalDeposit = deposit ?? item.deposit;
-    const finalTotal = totalPaid ?? (Number(finalFee) + Number(finalDeposit));
+    const finalTotal = totalPaid ?? Number(finalFee) + Number(finalDeposit);
 
     // 4) INSERT rentalorder
     const { data: order, error: orderError } = await admin
@@ -195,25 +216,38 @@ export async function POST(request: Request) {
       if (orderError.code === "23P01") {
         return NextResponse.json(
           { message: "ช่วงวันที่นี้ถูกจองแล้ว กรุณาเลือกช่วงอื่น" },
-          { status: 409 }
+          { status: 409 },
         );
       }
       console.error("Insert rentalorder error:", orderError);
       return NextResponse.json(
         { message: "ส่งคำขอไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" },
-        { status: 500 }
+        { status: 500 },
       );
+    }
+
+    // 5) สร้างห้องแชทผูกกับออเดอร์ทันที (order-bound chat)
+    if (item.user_id) {
+      try {
+        await admin.from("chatroom").insert({
+          user_a: renterUserId,
+          user_b: item.user_id,
+          order_id: order.order_id,
+        });
+      } catch (chatErr) {
+        console.error("Auto create chatroom error on rental:", chatErr);
+      }
     }
 
     return NextResponse.json(
       { orderId: order.order_id, userId: renterUserId, warnings },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("POST /api/rentals error:", error);
     return NextResponse.json(
       { message: "เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

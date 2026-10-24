@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { uploadToStorage } from "@/lib/storage";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -54,11 +55,11 @@ export async function GET() {
 
     const admin = createAdminClient();
 
-    const [profileRes, roleAssignmentsRes, allRolesRes, phonesRes] = await Promise.all([
+    const [profileRes, roleAssignmentsRes, allRolesRes, phonesRes, bankRes] = await Promise.all([
       admin
         .from("useraccount")
         .select(
-          "user_id, username, email, national_id, bio, avatar_url, banner_url, updated_at, status, created_at"
+          "user_id, username, email, national_id, bio, avatar_url, banner_url, updated_at, status, created_at, identity_verification_status, id_card_url, id_card_selfie_url"
         )
         .eq("user_id", user.id)
         .maybeSingle(),
@@ -71,6 +72,11 @@ export async function GET() {
         .from("userphones")
         .select("phone")
         .eq("user_id", user.id),
+      admin
+        .from("bankaccount")
+        .select("bank_account_id, bank_name, account_number, account_name, verification_status")
+        .eq("user_id", user.id)
+        .maybeSingle(),
     ]);
 
     let profile = profileRes.data;
@@ -101,6 +107,9 @@ export async function GET() {
         updated_at: new Date().toISOString(),
         status: "Active",
         created_at: new Date().toISOString(),
+        identity_verification_status: "unverified",
+        id_card_url: null,
+        id_card_selfie_url: null,
       };
     }
 
@@ -142,6 +151,18 @@ export async function GET() {
         status: profile.status,
         roles,
         createdAt: profile.created_at,
+        identityVerificationStatus: profile.identity_verification_status || "unverified",
+        idCardUrl: profile.id_card_url || null,
+        idCardSelfieUrl: profile.id_card_selfie_url || null,
+        bankAccount: bankRes.data
+          ? {
+              id: bankRes.data.bank_account_id,
+              bankName: bankRes.data.bank_name,
+              accountNumber: bankRes.data.account_number,
+              accountName: bankRes.data.account_name,
+              verificationStatus: bankRes.data.verification_status || "pending",
+            }
+          : null,
       },
     });
   } catch (error) {
@@ -204,14 +225,34 @@ export async function PATCH(request: Request) {
       bio: bio ?? "",
       updated_at: new Date().toISOString(),
     };
+
     if (avatarUrl === "") {
       updateData.avatar_url = null;
     } else if (avatarUrl && avatarUrl.startsWith("data:")) {
+      try {
+        const res = await uploadToStorage("avatars", user.id, avatarUrl, {
+          fileName: `avatar_${Date.now()}.png`,
+        });
+        updateData.avatar_url = res.publicUrl;
+      } catch (err) {
+        console.warn("Failed to upload avatar data URI to storage:", err);
+      }
+    } else if (avatarUrl && (avatarUrl.startsWith("http://") || avatarUrl.startsWith("https://"))) {
       updateData.avatar_url = avatarUrl;
     }
+
     if (bannerUrl === "") {
       updateData.banner_url = null;
     } else if (bannerUrl && bannerUrl.startsWith("data:")) {
+      try {
+        const res = await uploadToStorage("banners", user.id, bannerUrl, {
+          fileName: `banner_${Date.now()}.jpg`,
+        });
+        updateData.banner_url = res.publicUrl;
+      } catch (err) {
+        console.warn("Failed to upload banner data URI to storage:", err);
+      }
+    } else if (bannerUrl && (bannerUrl.startsWith("http://") || bannerUrl.startsWith("https://"))) {
       updateData.banner_url = bannerUrl;
     }
 
@@ -266,15 +307,15 @@ export async function PATCH(request: Request) {
     }
 
     // 4. Update auth.users email and metadata
+    const finalAvatarUrl =
+      avatarUrl === ""
+        ? null
+        : updateData.avatar_url ?? user.user_metadata?.avatar_url ?? null;
+
     const userMetadata = {
       ...(user.user_metadata || {}),
       username,
-      avatar_url:
-        avatarUrl === ""
-          ? null
-          : avatarUrl
-          ? `/api/avatar?id=${user.id}`
-          : user.user_metadata?.avatar_url,
+      avatar_url: finalAvatarUrl,
     };
 
     const authUpdatePayload: any = {
@@ -312,6 +353,168 @@ export async function PATCH(request: Request) {
     console.error("Profile PATCH error:", error);
     return NextResponse.json(
       { message: "เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE() {
+  try {
+    const supabase = await createServerClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { message: "กรุณาเข้าสู่ระบบก่อนดำเนินการ" },
+        { status: 401 }
+      );
+    }
+
+    const admin = createAdminClient();
+    const activeStatuses = [
+      "requested",
+      "awaiting_payment",
+      "paid",
+      "item_sent",
+      "item_received",
+      "awaiting_additional_payment",
+    ];
+
+    // 1. ตรวจสอบว่าผู้เช่ามีออเดอร์ที่ยังดำเนินอยู่หรือไม่
+    const { data: renterOrders, error: renterErr } = await admin
+      .from("rentalorder")
+      .select("order_id, status")
+      .eq("user_id", user.id)
+      .in("status", activeStatuses)
+      .limit(1);
+
+    if (renterErr) {
+      console.error("Error checking renter active orders:", renterErr);
+      return NextResponse.json(
+        { message: "เกิดข้อผิดพลาดในการตรวจสอบรายการเช่า" },
+        { status: 500 }
+      );
+    }
+
+    if (renterOrders && renterOrders.length > 0) {
+      return NextResponse.json(
+        {
+          message:
+            "ไม่สามารถลบบัญชีได้ เนื่องจากคุณมีรายการเช่าที่กำลังดำเนินการอยู่ กรุณาดำเนินการคืนสินค้าหรือรอคำสั่งซื้อเสร็จสิ้นก่อน",
+        },
+        { status: 400 }
+      );
+    }
+
+    // 2. ตรวจสอบว่าผู้ให้เช่ามีออเดอร์ที่ยังดำเนินอยู่บนสินค้าของตนเองหรือไม่
+    const { data: userItems, error: itemsErr } = await admin
+      .from("item")
+      .select("item_id")
+      .eq("user_id", user.id);
+
+    if (itemsErr) {
+      console.error("Error fetching user items:", itemsErr);
+    }
+
+    if (userItems && userItems.length > 0) {
+      const itemIds = userItems.map((it) => it.item_id);
+      const { data: lenderOrders, error: lenderOrdersErr } = await admin
+        .from("rentalorder")
+        .select("order_id, status")
+        .in("item_id", itemIds)
+        .in("status", activeStatuses)
+        .limit(1);
+
+      if (lenderOrdersErr) {
+        console.error("Error checking lender active orders:", lenderOrdersErr);
+        return NextResponse.json(
+          { message: "เกิดข้อผิดพลาดในการตรวจสอบรายการเช่าของสินค้าคุณ" },
+          { status: 500 }
+        );
+      }
+
+      if (lenderOrders && lenderOrders.length > 0) {
+        return NextResponse.json(
+          {
+            message:
+              "ไม่สามารถลบบัญชีได้ เนื่องจากมีผู้เช่ากำลังเช่าสินค้าของคุณอยู่ กรุณารอให้ออเดอร์เสร็จสิ้นก่อน",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 3. ซ่อนสินค้าทั้งหมดของผู้ใช้นี้ (Soft delete items)
+    await admin
+      .from("item")
+      .update({
+        status: "inactive",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user.id);
+
+    // 4. ทำ Soft Delete ใน useraccount
+    // เปลี่ยนสถานะเป็น Deactivated, แปลง Username/Email และเคลียร์ข้อมูล KYC
+    const anonymizedUsername = `deleted_${user.id.slice(0, 8)}`;
+    const anonymizedEmail = `deleted_${user.id}@deleted.local`;
+
+    await admin
+      .from("useraccount")
+      .update({
+        status: "Deactivated",
+        username: anonymizedUsername,
+        email: anonymizedEmail,
+        national_id: null,
+        phone: null,
+        bio: null,
+        avatar_url: null,
+        banner_url: null,
+        id_card_url: null,
+        id_card_selfie_url: null,
+        identity_verification_status: "unverified",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user.id);
+
+    // 5. ลบข้อมูลส่วนตัวใน userphones และ bankaccount
+    await Promise.allSettled([
+      admin.from("userphones").delete().eq("user_id", user.id),
+      admin.from("bankaccount").delete().eq("user_id", user.id),
+    ]);
+
+    // 6. ลบไฟล์ส่วนตัวใน Supabase Storage (KYC, Avatars, Banners)
+    try {
+      const bucketsToClean = ["kyc", "avatars", "banners"];
+      for (const b of bucketsToClean) {
+        const { data: files } = await admin.storage.from(b).list(user.id);
+        if (files && files.length > 0) {
+          await admin.storage
+            .from(b)
+            .remove(files.map((f) => `${user.id}/${f.name}`));
+        }
+      }
+    } catch (e) {
+      console.warn("Storage cleanup error during account deactivation:", e);
+    }
+
+    // 7. ลบบัญชีใน Supabase Auth เพื่อตัดสิทธิ์การล็อกอิน
+    try {
+      await admin.auth.admin.deleteUser(user.id);
+    } catch (e) {
+      console.warn("Supabase Auth delete error:", e);
+    }
+
+    return NextResponse.json({
+      message: "ลบบัญชีผู้ใช้งานเรียบร้อยแล้ว",
+      success: true,
+    });
+  } catch (error) {
+    console.error("Account delete error:", error);
+    return NextResponse.json(
+      { message: "เกิดข้อผิดพลาดในการลบบัญชีผู้ใช้งาน" },
       { status: 500 }
     );
   }

@@ -32,7 +32,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     return apiError("ไม่พบรายการเช่านี้", 404);
   }
 
-  const [{ data: item }, { data: itemImages }, { data: payments }] = await Promise.all([
+  const [{ data: item }, { data: itemImages }, { data: payments }, { data: evidence }] = await Promise.all([
     order.item_id
       ? admin.from("item").select("item_id, item_name, user_id, rental_fee_per_day, deposit").eq("item_id", order.item_id).maybeSingle()
       : { data: null },
@@ -40,12 +40,18 @@ export async function GET(_request: NextRequest, { params }: Params) {
       ? admin.from("itemimage").select("image_url, is_primary").eq("item_id", order.item_id)
       : { data: [] },
     admin.from("payment").select("payment_id, amount, status, slip_image_url, date").eq("order_id", id),
+    admin
+      .from("rentalevidenceimage")
+      .select("evidence_id, evidence_type, image_url, created_at, uploaded_by")
+      .eq("order_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
   const fullData = {
     ...order,
     item: item ? { ...item, itemimage: itemImages || [] } : null,
     payment: payments || [],
+    evidence: evidence || [],
   };
 
   return apiSuccess(fullData);

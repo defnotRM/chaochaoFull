@@ -1,11 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
   ArrowLeft,
-  ArrowRight,
   Camera,
   CheckCircle2,
   Clock3,
@@ -15,6 +15,12 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+
+type EvidenceSummary = {
+  count: number;
+  uploadedAt: string;
+  imageUrls: string[];
+};
 
 export interface HandoverPageData {
   orderId: string;
@@ -28,14 +34,33 @@ export interface HandoverPageData {
   status: string;
   ownerName: string;
   ownerId: string;
-  renterEvidence: { count: number; uploadedAt: string } | null;
-  lenderEvidence: { count: number; uploadedAt: string } | null;
+  renterName: string;
+  // หน้าเดียวกันใช้ทั้งผู้เช่า (รับของ) และผู้ให้เช่า (ส่งมอบของ)
+  viewerRole: "renter" | "lender";
+  renterEvidence: EvidenceSummary | null;
+  lenderEvidence: EvidenceSummary | null;
 }
 
-const thb = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", maximumFractionDigits: 0 });
+const thb = new Intl.NumberFormat("th-TH", {
+  style: "currency",
+  currency: "THB",
+  maximumFractionDigits: 0,
+});
 // pin timezone ให้ SSR กับ client ตรงกัน (กัน hydration mismatch)
-const dateFmt = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", weekday: "short", day: "numeric", month: "short", year: "numeric" });
-const dateTimeFmt = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const dateFmt = new Intl.DateTimeFormat("th-TH", {
+  timeZone: "Asia/Bangkok",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+const dateTimeFmt = new Intl.DateTimeFormat("th-TH", {
+  timeZone: "Asia/Bangkok",
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 const ALLOWED = ["image/jpeg", "image/png"];
 
 function formatDate(key: string) {
@@ -43,67 +68,83 @@ function formatDate(key: string) {
   return dateFmt.format(new Date(Date.UTC(y, m - 1, d)));
 }
 
-type Slot = { label: string; file: File | null; url: string | null };
+type Photo = { id: string; file: File; url: string };
 
-const DEFAULT_LABELS = ["บอดี้หน้า", "บอดี้หลัง", "เลนส์", "มุมล่างซ้าย"];
+// ต้องตรงกับ MAX_HANDOVER_PHOTOS ใน app/api/handover/route.ts
+const MAX_PHOTOS = 5;
 
 export default function HandoverClient({ data }: { data: HandoverPageData }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const activeSlotRef = useRef<number>(-1);
 
-  const [slots, setSlots] = useState<Slot[]>(
-    DEFAULT_LABELS.map((label) => ({ label, file: null, url: null }))
-  );
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const alreadyUploaded = data.renterEvidence !== null;
-  const attachedCount = slots.filter((s) => s.file).length;
+  const isLender = data.viewerRole === "lender";
+  const myEvidence = isLender ? data.lenderEvidence : data.renterEvidence;
+  const otherEvidence = isLender ? data.renterEvidence : data.lenderEvidence;
+  const myName = isLender ? data.ownerName : data.renterName;
+  const otherName = isLender ? data.renterName : data.ownerName;
+  const myRoleLabel = isLender ? "ผู้ให้เช่า" : "ผู้เช่า";
+  const otherRoleLabel = isLender ? "ผู้เช่า" : "ผู้ให้เช่า";
+  const actionLabel = isLender ? "ส่งมอบของ" : "รับของ";
+  const detailHref = isLender
+    ? `/dashboard/${data.ownerId}/lend/${data.orderId}`
+    : `/renter/myproductsList/${data.orderId}`;
+  const alreadyUploaded = myEvidence !== null;
 
-  function pick(index: number) {
-    activeSlotRef.current = index;
-    inputRef.current?.click();
-  }
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState<
+    "changed_mind" | "not_as_advertised"
+  >("changed_mind");
+  const [rejectDescription, setRejectDescription] = useState("");
+  const [rejectImagePreview, setRejectImagePreview] = useState<string | null>(
+    null,
+  );
+  const [isRejecting, setIsRejecting] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+  const attachedCount = photos.length;
 
-  function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  function onFilesChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const chosen = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!file) return;
-    if (!ALLOWED.includes(file.type)) {
-      setErrorMsg("รองรับเฉพาะไฟล์รูป JPG หรือ PNG");
-      return;
+    if (chosen.length === 0) return;
+
+    const errors: string[] = [];
+    const valid: Photo[] = [];
+    const remaining = MAX_PHOTOS - photos.length;
+    for (const file of chosen) {
+      if (!ALLOWED.includes(file.type)) {
+        errors.push("รองรับเฉพาะไฟล์รูป JPG หรือ PNG");
+        continue;
+      }
+      if (valid.length >= remaining) {
+        errors.push(`อัปโหลดได้ไม่เกิน ${MAX_PHOTOS} รูป`);
+        break;
+      }
+      valid.push({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        file,
+        url: URL.createObjectURL(file),
+      });
     }
+
+    if (valid.length > 0) setPhotos((prev) => [...prev, ...valid]);
+    setErrorMsg(errors.length > 0 ? [...new Set(errors)].join(" • ") : null);
+  }
+
+  function removePhoto(id: string) {
     setErrorMsg(null);
-    const i = activeSlotRef.current;
-    setSlots((prev) => {
-      const next = [...prev];
-      if (next[i]?.url) URL.revokeObjectURL(next[i].url!);
-      next[i] = { ...next[i], file, url: URL.createObjectURL(file) };
-      return next;
+    setPhotos((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (target) URL.revokeObjectURL(target.url);
+      return prev.filter((p) => p.id !== id);
     });
-  }
-
-  function removeSlot(index: number) {
-    setSlots((prev) => {
-      const next = [...prev];
-      if (next[index]?.url) URL.revokeObjectURL(next[index].url!);
-      next[index] = { ...next[index], file: null, url: null };
-      return next;
-    });
-  }
-
-  function addSlot() {
-    setSlots((prev) => {
-      const next = [...prev, { label: "เพิ่มเติม", file: null, url: null }];
-      return next;
-    });
-    // เปิด picker ให้ช่องใหม่
-    setTimeout(() => pick(slots.length), 0);
   }
 
   async function handleSubmit() {
-    const files = slots.filter((s) => s.file).map((s) => s.file!) as File[];
+    const files = photos.map((p) => p.file);
     if (files.length === 0) {
       setErrorMsg("กรุณาแนบรูปหลักฐานอย่างน้อย 1 รูป");
       return;
@@ -128,26 +169,61 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
     }
   }
 
+  async function handleSubmitReject() {
+    setIsRejecting(true);
+    setRejectError(null);
+    try {
+      const res = await fetch(`/api/rentals/${data.orderId}/reject-pickup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: rejectReason,
+          description: rejectDescription,
+          imageUrls: rejectImagePreview ? [rejectImagePreview] : [],
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRejectError(payload?.message ?? "ดำเนินการไม่สำเร็จ");
+        return;
+      }
+      router.push(`/renter/myproductsList/${data.orderId}`);
+    } catch {
+      setRejectError("เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setIsRejecting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 pb-16 pt-6 sm:pb-20 sm:pt-8">
       <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
         <nav className="mb-4 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-          <Link href="/renter/mydashboard" className="transition hover:text-[#1b3554]">
-            รายการเช่าของฉัน
+          <Link
+            href={
+              isLender ? `/dashboard/${data.ownerId}` : "/renter/mydashboard"
+            }
+            className="transition hover:text-[#1b3554]"
+          >
+            {isLender ? "รายการปล่อยเช่าของฉัน" : "รายการเช่าของฉัน"}
           </Link>
           <span aria-hidden="true">/</span>
-          <Link href={`/renter/myproductsList/${data.orderId}`} className="transition hover:text-[#1b3554]">
+          <Link href={detailHref} className="transition hover:text-[#1b3554]">
             รายละเอียดการเช่า
           </Link>
           <span aria-hidden="true">/</span>
-          <span className="font-semibold text-[#1b3554]">รับของ</span>
+          <span className="font-semibold text-[#1b3554]">{actionLabel}</span>
         </nav>
 
         <header className="mb-6">
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">รับของ</h1>
+          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+            {actionLabel}
+          </h1>
           <p className="mt-1.5 text-sm text-slate-500">
-            อัปโหลดหลักฐานสภาพสินค้า <strong className="text-slate-700">ก่อนเริ่มเช่า</strong>{" "}
-            ทั้งคุณและผู้ปล่อยเช่าต้องอัปโหลด · ใช้เทียบกันหากมีข้อพิพาทตอนคืน
+            อัปโหลดหลักฐานสภาพสินค้า{" "}
+            <strong className="text-slate-700">ก่อนเริ่มเช่า</strong> ทั้งคุณและ
+            {otherRoleLabel}ต้องอัปโหลด และเห็นรูปของกันและกัน ·
+            ใช้เทียบกันหากมีข้อพิพาทตอนคืน
           </p>
         </header>
 
@@ -160,15 +236,21 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
             <section className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
               <div className="mb-4 flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-rose-500" />
-                <h2 className="text-lg font-bold text-slate-900">นัดหมายรับของ</h2>
-                <span className="text-xs text-slate-400">ตกลงกับผู้ปล่อยเช่าแล้ว</span>
+                <h2 className="text-lg font-bold text-slate-900">
+                  นัดหมาย{actionLabel}
+                </h2>
+                <span className="text-xs text-slate-400">
+                  ตกลงกับ{otherRoleLabel}แล้ว
+                </span>
               </div>
               <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
                 <p className="text-xs font-semibold text-[#3f6593]">→ รับของ</p>
                 <p className="mt-1 text-base font-bold text-slate-900">
                   {data.meetupLocation || "จุดนัดรับ"}
                 </p>
-                <p className="mt-0.5 text-sm text-slate-500">{formatDate(data.startDate)}</p>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  {formatDate(data.startDate)}
+                </p>
               </div>
             </section>
 
@@ -179,14 +261,25 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
                   <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#c0e6fd]/30 text-[#1b3554]">
                     <Camera className="h-5 w-5" />
                   </span>
-                  <h2 className="text-lg font-bold text-slate-900">หลักฐานตอนรับของ</h2>
+                  <h2 className="text-lg font-bold text-slate-900">
+                    หลักฐานตอน{actionLabel}
+                  </h2>
+                  {!alreadyUploaded && (
+                    <span className="text-xs font-semibold text-slate-500">
+                      {attachedCount}/{MAX_PHOTOS} รูป
+                    </span>
+                  )}
                 </div>
                 <span
                   className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                    alreadyUploaded ? "bg-emerald-500/15 text-emerald-700" : "bg-amber-500/15 text-amber-800"
+                    alreadyUploaded
+                      ? "bg-emerald-500/15 text-emerald-700"
+                      : "bg-amber-500/15 text-amber-800"
                   }`}
                 >
-                  <span className={`h-1.5 w-1.5 rounded-full ${alreadyUploaded ? "bg-emerald-500" : "bg-amber-500"}`} />
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${alreadyUploaded ? "bg-emerald-500" : "bg-amber-500"}`}
+                  />
                   {alreadyUploaded ? "ครบแล้ว" : "ยังไม่ครบ"}
                 </span>
               </div>
@@ -194,66 +287,82 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
               <div className="flex items-start gap-2 rounded-2xl border border-sky-100 bg-sky-50/50 px-4 py-3">
                 <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                 <p className="text-xs leading-relaxed text-slate-600">
-                  <strong className="text-slate-800">ถ่ายให้ครบก่อนรับของออกจากจุดนัดเสมอ</strong> — อย่างน้อย 4 มุม +
-                  จุดที่มีตำหนิเดิมตามที่ระบุในโพสต์ ถ้าไม่มีรูปตอนนี้ จะไม่สามารถอ้างสิทธิ์ได้หากมีข้อพิพาทภายหลัง
+                  <strong className="text-slate-800">
+                    {isLender
+                      ? "ถ่ายให้ครบก่อนส่งมอบของให้ผู้เช่าเสมอ"
+                      : "ถ่ายให้ครบก่อนรับของออกจากจุดนัดเสมอ"}
+                  </strong>{" "}
+                  — ถ่ายให้ครบทุกมุม รวมถึงจุดที่มีตำหนิเดิม (สูงสุด{" "}
+                  {MAX_PHOTOS} รูป) ถ้าไม่มีรูปตอนนี้
+                  จะไม่สามารถอ้างสิทธิ์ได้หากมีข้อพิพาทภายหลัง
                 </p>
               </div>
 
-              {/* กริดช่องรูป */}
+              {/* กริดรูปหลักฐาน */}
               <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
                 {alreadyUploaded
-                  ? DEFAULT_LABELS.map((label) => (
-                      <div
-                        key={label}
-                        className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-2xl bg-sky-50/60 text-slate-400 ring-1 ring-sky-100"
+                  ? (myEvidence?.imageUrls ?? []).map((url, index) => (
+                      <a
+                        key={`${url}-${index}`}
+                        href={url.startsWith("data:") ? undefined : url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative block aspect-square overflow-hidden rounded-2xl ring-1 ring-emerald-200"
                       >
-                        <Camera className="h-6 w-6" />
-                        <span className="text-[11px] text-slate-500">{label}</span>
-                      </div>
+                        <Image
+                          src={url}
+                          alt={`รูปหลักฐานที่ ${index + 1}`}
+                          fill
+                          sizes="(max-width: 640px) 33vw, 20vw"
+                          className="object-cover transition group-hover:scale-105"
+                          unoptimized={url.startsWith("data:") || url.startsWith("blob:")}
+                        />
+                        <span className="absolute inset-x-1.5 bottom-1.5 inline-flex items-center justify-center gap-1 truncate rounded-md bg-emerald-600/85 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                          <CheckCircle2 className="h-3 w-3 shrink-0" />
+                          รูปที่ {index + 1}
+                        </span>
+                      </a>
                     ))
-                  : slots.map((slot, index) => (
-                      <div key={index} className="relative aspect-square">
-                        {slot.url ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={slot.url}
-                              alt={slot.label}
-                              className="h-full w-full rounded-2xl object-cover ring-1 ring-slate-200"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeSlot(index)}
-                              className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-lg bg-white/90 text-rose-600 shadow-sm transition hover:bg-white"
-                              aria-label="ลบรูป"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                            <span className="absolute inset-x-1.5 bottom-1.5 truncate rounded-md bg-black/45 px-1.5 py-0.5 text-center text-[10px] font-medium text-white">
-                              {slot.label}
-                            </span>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => pick(index)}
-                            className="flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-2xl bg-sky-50/60 text-slate-400 ring-1 ring-sky-100 transition hover:bg-sky-100/60 hover:text-[#3f6593]"
-                          >
-                            <Camera className="h-6 w-6" />
-                            <span className="text-[11px]">{slot.label}</span>
-                          </button>
-                        )}
+                  : photos.map((photo, index) => (
+                      <div key={photo.id} className="relative aspect-square overflow-hidden rounded-2xl ring-1 ring-slate-200">
+                        <Image
+                          src={photo.url}
+                          alt={`รูปหลักฐานที่ ${index + 1}`}
+                          fill
+                          sizes="(max-width: 640px) 33vw, 20vw"
+                          className="object-cover"
+                          unoptimized={photo.url.startsWith("data:") || photo.url.startsWith("blob:")}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(photo.id)}
+                          disabled={submitting}
+                          className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-lg bg-white/90 text-rose-600 shadow-sm transition hover:bg-white disabled:opacity-50"
+                          aria-label={`ลบรูปที่ ${index + 1}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="absolute inset-x-1.5 bottom-1.5 truncate rounded-md bg-black/45 px-1.5 py-0.5 text-center text-[10px] font-medium text-white">
+                          รูปที่ {index + 1}
+                        </span>
                       </div>
                     ))}
 
-                {!alreadyUploaded && (
+                {!alreadyUploaded && photos.length < MAX_PHOTOS && (
                   <button
                     type="button"
-                    onClick={addSlot}
-                    className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition hover:border-[#3f6593] hover:text-[#3f6593]"
+                    onClick={() => inputRef.current?.click()}
+                    disabled={submitting}
+                    className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-2xl border-2 border-dashed border-slate-300 text-slate-400 transition hover:border-[#3f6593] hover:bg-sky-50/50 hover:text-[#3f6593] disabled:opacity-50"
                   >
-                    <Plus className="h-6 w-6" />
-                    <span className="text-[11px]">เพิ่มรูป</span>
+                    {photos.length === 0 ? (
+                      <Camera className="h-6 w-6" />
+                    ) : (
+                      <Plus className="h-6 w-6" />
+                    )}
+                    <span className="text-[11px]">
+                      {photos.length === 0 ? "ถ่าย / เลือกรูป" : "เพิ่มรูป"}
+                    </span>
                   </button>
                 )}
               </div>
@@ -262,36 +371,64 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
                 ref={inputRef}
                 type="file"
                 accept="image/jpeg,image/png"
+                multiple
                 className="hidden"
-                onChange={onFileChosen}
+                onChange={onFilesChosen}
               />
-              {errorMsg && <p className="mt-2 text-xs font-medium text-rose-600">{errorMsg}</p>}
+              {errorMsg && (
+                <p className="mt-2 text-xs font-medium text-rose-600">
+                  {errorMsg}
+                </p>
+              )}
 
-              {/* แถวสถานะผู้เช่า */}
+              {/* แถวสถานะของเรา */}
               <UploaderRow
-                initials="วช"
-                name="คุณ (ผู้เช่า)"
+                initials={myName.slice(0, 2)}
+                name={`คุณ (${myRoleLabel})`}
                 done={alreadyUploaded}
                 subtitle={
-                  alreadyUploaded && data.renterEvidence
-                    ? `อัปโหลดแล้ว ${data.renterEvidence.count} รูป · ${dateTimeFmt.format(new Date(data.renterEvidence.uploadedAt))}`
+                  myEvidence
+                    ? `อัปโหลดแล้ว ${myEvidence.count} รูป · ${dateTimeFmt.format(new Date(myEvidence.uploadedAt))}`
                     : attachedCount > 0
                       ? `เลือกไว้ ${attachedCount} รูป · ยังไม่ได้ส่ง`
                       : "ยังไม่ได้อัปโหลด"
                 }
               />
 
-              {/* แถวสถานะผู้ปล่อยเช่า (อ่านจาก DB จริง) */}
+              {/* แถวสถานะอีกฝ่าย + รูปหลักฐานของอีกฝ่าย */}
               <UploaderRow
-                initials={data.ownerName.slice(0, 2)}
-                name={`${data.ownerName} (ผู้ปล่อยเช่า)`}
-                done={data.lenderEvidence !== null}
+                initials={otherName.slice(0, 2)}
+                name={`${otherName} (${otherRoleLabel})`}
+                done={otherEvidence !== null}
                 subtitle={
-                  data.lenderEvidence
-                    ? `อัปโหลดแล้ว ${data.lenderEvidence.count} รูป · ${dateTimeFmt.format(new Date(data.lenderEvidence.uploadedAt))}`
-                    : "รอผู้ปล่อยเช่าอัปโหลด"
+                  otherEvidence
+                    ? `อัปโหลดแล้ว ${otherEvidence.count} รูป · ${dateTimeFmt.format(new Date(otherEvidence.uploadedAt))}`
+                    : `รอ${otherRoleLabel}อัปโหลด · รีเฟรชหน้าเพื่อดูรูปล่าสุด`
                 }
-              />
+              >
+                {otherEvidence && otherEvidence.imageUrls.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {otherEvidence.imageUrls.map((url, index) => (
+                      <a
+                        key={`${url}-${index}`}
+                        href={url.startsWith("data:") ? undefined : url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative block aspect-square overflow-hidden rounded-xl ring-1 ring-slate-200"
+                      >
+                        <Image
+                          src={url}
+                          alt={`รูปหลักฐานของ${otherRoleLabel} ${index + 1}`}
+                          fill
+                          sizes="(max-width: 640px) 33vw, 20vw"
+                          className="object-cover transition group-hover:scale-105"
+                          unoptimized={url.startsWith("data:") || url.startsWith("blob:")}
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </UploaderRow>
 
               {/* ปุ่มยืนยัน (เฉพาะยังไม่อัปโหลด) */}
               {!alreadyUploaded && (
@@ -302,38 +439,31 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
                   className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1b3554] to-[#3f6593] px-5 py-3 text-sm font-semibold text-white shadow-md shadow-[#1b3554]/15 transition hover:from-[#000f22] hover:to-[#1b3554] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
                 >
                   <Camera className="h-4 w-4" />
-                  {submitting ? "กำลังอัปโหลด…" : `ยืนยันรับของ / อัปโหลดหลักฐาน (${attachedCount})`}
+                  {submitting
+                    ? "กำลังอัปโหลด…"
+                    : `ยืนยัน${actionLabel} / อัปโหลดหลักฐาน (${attachedCount})`}
+                </button>
+              )}
+              {/* ปุ่มปฏิเสธหน้างาน (เฉพาะอัปโหลดแล้ว + สถานะยัง item_sent อยู่) */}
+              {!isLender && alreadyUploaded && data.status === "item_sent" && (
+                <button
+                  type="button"
+                  onClick={() => setShowRejectModal(true)}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
+                >
+                  ของไม่โอเค / ไม่รับสินค้า
                 </button>
               )}
 
               {/* Footer */}
               <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <Link
-                  href={`/renter/myproductsList/${data.orderId}`}
+                  href={detailHref}
+                  aria-label="กลับไปหน้ารายละเอียดการเช่า"
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554] active:scale-95"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  กลับไปรายการเช่า
                 </Link>
-                {data.status === "item_sent" || data.status === "item_returned" ? (
-                  <Link
-                    href={`/renter/myproductsList/${data.orderId}/return`}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1b3554] to-[#3f6593] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#1b3554]/15 transition hover:from-[#000f22] hover:to-[#1b3554] active:scale-95"
-                  >
-                    ไปหน้าคืนของ
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    disabled
-                    title="ต้องรับของก่อนจึงจะคืนของได้"
-                    className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-400 opacity-70"
-                  >
-                    ไปหน้าคืนของ
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                )}
               </div>
             </section>
           </div>
@@ -343,7 +473,9 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
             <div className="space-y-4 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-center gap-2.5 border-b border-slate-100 pb-4">
                 <Clock3 className="h-5 w-5 text-[#1b3554]" />
-                <h2 className="text-base font-bold text-slate-900">สถานะการเช่า</h2>
+                <h2 className="text-base font-bold text-slate-900">
+                  สถานะการเช่า
+                </h2>
               </div>
 
               <StatusTimeline data={data} />
@@ -357,7 +489,9 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-slate-500">เงินประกัน</span>
-                <span className="text-sm font-bold text-slate-900">{thb.format(data.deposit)}</span>
+                <span className="text-sm font-bold text-slate-900">
+                  {thb.format(data.deposit)}
+                </span>
               </div>
 
               <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
@@ -366,9 +500,14 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
                   เก็บรูปหลักฐานไว้เป็นสิทธิ์ของคุณ
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-                  หากผู้ปล่อยเช่าแจ้งความเสียหายที่ไม่ตรงกับรูปตอนรับของ ใช้รูปนี้โต้แย้งได้ที่หน้าประเมินความเสียหาย
+                  {isLender
+                    ? "หากของที่ได้รับคืนเสียหายต่างจากรูปตอนส่งมอบ ใช้รูปนี้เป็นหลักฐานตอนประเมินความเสียหาย"
+                    : "หากผู้ปล่อยเช่าแจ้งความเสียหายที่ไม่ตรงกับรูปตอนรับของ ใช้รูปนี้โต้แย้งได้ที่หน้าประเมินความเสียหาย"}
                 </p>
-                <span className="mt-3 inline-flex cursor-not-allowed items-center gap-1 text-xs font-semibold text-slate-400" title="ยังไม่เปิดใช้งาน">
+                <span
+                  className="mt-3 inline-flex cursor-not-allowed items-center gap-1 text-xs font-semibold text-slate-400"
+                  title="ยังไม่เปิดใช้งาน"
+                >
                   คืนของ &amp; ประเมินความเสียหาย →
                 </span>
               </div>
@@ -376,6 +515,106 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
           </aside>
         </div>
       </div>
+
+      {showRejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-slate-900">ไม่รับสินค้า</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              เลือกเหตุผลที่ตรงกับสถานการณ์ของคุณ
+            </p>
+
+            <div className="mt-4 space-y-2.5">
+              <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 p-3 cursor-pointer has-[:checked]:border-[#3f6593] has-[:checked]:bg-sky-50">
+                <input
+                  type="radio"
+                  name="rejectReason"
+                  checked={rejectReason === "changed_mind"}
+                  onChange={() => setRejectReason("changed_mind")}
+                  className="mt-0.5"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">
+                    เปลี่ยนใจ ไม่เอาแล้ว
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    สินค้าปกติดี แค่ไม่อยากเช่าต่อแล้ว (คืนประกัน 100% + ค่าเช่า
+                    20%)
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 p-3 cursor-pointer has-[:checked]:border-[#3f6593] has-[:checked]:bg-sky-50">
+                <input
+                  type="radio"
+                  name="rejectReason"
+                  checked={rejectReason === "not_as_advertised"}
+                  onChange={() => setRejectReason("not_as_advertised")}
+                  className="mt-0.5"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">
+                    สินค้าไม่ตรงปก
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    ของจริงไม่ตรงกับที่ลงประกาศไว้ (ส่งให้แอดมินตรวจสอบ)
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            {rejectReason === "not_as_advertised" && (
+              <div className="mt-4 space-y-3">
+                <textarea
+                  value={rejectDescription}
+                  onChange={(e) => setRejectDescription(e.target.value)}
+                  rows={3}
+                  placeholder="อธิบายว่าไม่ตรงปกอย่างไร..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-sm outline-none focus:border-[#3f6593] focus:bg-white"
+                />
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () =>
+                        setRejectImagePreview(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="block w-full text-xs text-slate-500 file:mr-4 file:rounded-xl file:border-0 file:bg-[#1b3554] file:px-4 file:py-2 file:text-xs file:font-semibold file:text-white hover:file:bg-[#000f22]"
+                />
+              </div>
+            )}
+
+            {rejectError && (
+              <p className="mt-3 text-xs font-semibold text-rose-600">
+                {rejectError}
+              </p>
+            )}
+
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRejectModal(false)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                ปิด
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitReject}
+                disabled={isRejecting}
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-xs font-semibold text-white shadow-md transition hover:bg-rose-700 disabled:opacity-50"
+              >
+                {isRejecting ? "กำลังส่ง..." : "ยืนยัน"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -383,8 +622,8 @@ export default function HandoverClient({ data }: { data: HandoverPageData }) {
 /* ───────────── ชิ้นส่วนย่อย ───────────── */
 
 function Stepper() {
-  const steps = ["เลือกวัน–จุดนัด", "ส่งคำขอ", "ชำระเงิน", "รับของ", "คืนของ"];
-  const active = 3;
+  const steps = ["ส่งคำขอ", "ผู้ให้เช่าอนุมัติ", "รอชำระเงิน", "ตรวจการชำระ", "รับของ", "คืนของ"];
+  const active = 4;
   return (
     <div className="overflow-x-auto pb-1">
       <ol className="flex min-w-[680px] items-center">
@@ -393,7 +632,10 @@ function Stepper() {
           const isDone = index < active;
           const isLast = index === steps.length - 1;
           return (
-            <li key={label} className={`flex items-center ${isLast ? "" : "flex-1"}`}>
+            <li
+              key={label}
+              className={`flex items-center ${isLast ? "" : "flex-1"}`}
+            >
               <div className="flex shrink-0 items-center gap-2.5">
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
@@ -406,11 +648,18 @@ function Stepper() {
                 >
                   {isDone ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
                 </span>
-                <span className={`whitespace-nowrap text-sm ${isActive ? "font-bold text-slate-900" : "font-medium text-slate-400"}`}>
+                <span
+                  className={`whitespace-nowrap text-sm ${isActive ? "font-bold text-slate-900" : "font-medium text-slate-400"}`}
+                >
                   {label}
                 </span>
               </div>
-              {!isLast && <span aria-hidden="true" className="mx-2 h-px flex-1 bg-slate-200 sm:mx-3" />}
+              {!isLast && (
+                <span
+                  aria-hidden="true"
+                  className="mx-2 h-px flex-1 bg-slate-200 sm:mx-3"
+                />
+              )}
             </li>
           );
         })}
@@ -424,29 +673,38 @@ function UploaderRow({
   name,
   subtitle,
   done,
+  children,
 }: {
   initials: string;
   name: string;
   subtitle: string;
   done: boolean;
+  children?: React.ReactNode;
 }) {
   return (
-    <div className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 p-3.5">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-xs font-bold text-white">
-        {initials.toUpperCase()}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-slate-900">{name}</p>
-        <p className="text-xs text-slate-500">{subtitle}</p>
+    <div className="mt-3 rounded-2xl border border-slate-200 p-3.5">
+      <div className="flex items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-xs font-bold text-white">
+          {initials.toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-slate-900">{name}</p>
+          <p className="text-xs text-slate-500">{subtitle}</p>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+            done
+              ? "bg-emerald-500/15 text-emerald-700"
+              : "bg-slate-100 text-slate-500"
+          }`}
+        >
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${done ? "bg-emerald-500" : "bg-slate-400"}`}
+          />
+          {done ? "เสร็จแล้ว" : "รอดำเนินการ"}
+        </span>
       </div>
-      <span
-        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-          done ? "bg-emerald-500/15 text-emerald-700" : "bg-slate-100 text-slate-500"
-        }`}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${done ? "bg-emerald-500" : "bg-slate-400"}`} />
-        {done ? "เสร็จแล้ว" : "รอดำเนินการ"}
-      </span>
+      {children}
     </div>
   );
 }
@@ -498,10 +756,17 @@ function StatusTimeline({ data }: { data: HandoverPageData }) {
               >
                 {done ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
               </span>
-              {!isLast && <span className={`my-0.5 w-0.5 flex-1 ${done ? "bg-emerald-500" : "bg-slate-200"}`} style={{ minHeight: "1.25rem" }} />}
+              {!isLast && (
+                <span
+                  className={`my-0.5 w-0.5 flex-1 ${done ? "bg-emerald-500" : "bg-slate-200"}`}
+                  style={{ minHeight: "1.25rem" }}
+                />
+              )}
             </div>
             <div className={isLast ? "" : "pb-3"}>
-              <p className={`text-sm ${active ? "font-bold text-slate-900" : done ? "font-semibold text-slate-700" : "font-medium text-slate-400"}`}>
+              <p
+                className={`text-sm ${active ? "font-bold text-slate-900" : done ? "font-semibold text-slate-700" : "font-medium text-slate-400"}`}
+              >
                 {label}
               </p>
               <p className="mt-0.5 text-xs text-slate-400">{hints[index]}</p>

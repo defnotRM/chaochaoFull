@@ -16,9 +16,12 @@ export async function GET(request: NextRequest) {
 
     const admin = createAdminClient();
 
-    let userId = requestedUserId || user?.id;
+    const userId = requestedUserId || user?.id;
     if (!userId) {
-      userId = "8a88d60a-e2cf-43a6-b4ea-baa9347bfee1"; // Default to romanlnw68
+      return NextResponse.json(
+        { message: "กรุณาระบุ userId หรือเข้าสู่ระบบ" },
+        { status: 401 }
+      );
     }
 
     // 1. ดึงรายการคำสั่งเช่าของผู้เช่าคนนี้
@@ -49,19 +52,19 @@ export async function GET(request: NextRequest) {
         : { data: [] },
     ]);
 
-    const itemMap = new Map<string, any>((rawItems || []).map((i) => [i.item_id, i]));
+    const itemMap = new Map((rawItems || []).map((i) => [i.item_id, i]));
     const lenderUserIds = Array.from(new Set((rawItems || []).map((i) => i.user_id).filter(Boolean)));
 
     const { data: lenders } = lenderUserIds.length > 0
       ? await admin.from("useraccount").select("user_id, username, avatar_url").in("user_id", lenderUserIds)
       : { data: [] };
 
-    const lenderMap = new Map<string, any>((lenders || []).map((l) => [l.user_id, l]));
+    const lenderMap = new Map((lenders || []).map((l) => [l.user_id, l]));
     const pendingPaymentOrderIds = new Set(
       (rawPayments || []).filter((p) => p.status === "pending").map((p) => p.order_id)
     );
 
-    const formattedOrders = orderList.map((o: any) => {
+    const formattedOrders = orderList.map((o) => {
       const it = itemMap.get(o.item_id);
       const lender = it?.user_id ? lenderMap.get(it.user_id) : null;
 
@@ -74,7 +77,11 @@ export async function GET(request: NextRequest) {
               lender: lender
                 ? {
                     username: lender.username || "เจ้าของสินค้า",
-                    avatarUrl: lender.avatar_url ? `/api/avatar?id=${lender.user_id}` : null,
+                    avatarUrl: lender.avatar_url
+                      ? (lender.avatar_url.startsWith("http")
+                          ? lender.avatar_url
+                          : `/api/avatar?id=${lender.user_id}`)
+                      : null,
                   }
                 : null,
             }

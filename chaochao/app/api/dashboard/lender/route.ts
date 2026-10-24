@@ -102,7 +102,9 @@ export async function GET(request: NextRequest) {
                     `${renter.firstname || ""} ${renter.lastname || ""}`.trim() ||
                     "ผู้เช่า",
                   avatarUrl: renter.avatar_url
-                    ? `/api/avatar?id=${renter.user_id}`
+                    ? (renter.avatar_url.startsWith("http")
+                        ? renter.avatar_url
+                        : `/api/avatar?id=${renter.user_id}`)
                     : null,
                   phone: phoneMap.get(renter.user_id) || null,
                 }

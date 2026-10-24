@@ -27,6 +27,8 @@ interface LenderItem {
   rental_fee_per_day: number;
   deposit: number;
   status: string;
+  /** แสดงผลเท่านั้น: ถูกเช่าออกไปอยู่ตอนนี้ (มีออเดอร์ item_sent/item_received) */
+  isRentedOut?: boolean;
   created_at: string;
   category?: {
     category_name: string;
@@ -109,7 +111,13 @@ export function LenderDashboardView({ userId }: { userId?: string } = {}) {
   );
 
   useEffect(() => {
-    loadData(false);
+    let cancelled = false;
+    const run = async () => {
+      if (!cancelled) {
+        await loadData(false);
+      }
+    };
+    void run();
 
     const supabase = createBrowserClient();
     const channel = supabase
@@ -130,6 +138,7 @@ export function LenderDashboardView({ userId }: { userId?: string } = {}) {
     }, 2000);
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
@@ -356,7 +365,7 @@ export function LenderDashboardView({ userId }: { userId?: string } = {}) {
 
                     <div className="flex items-center gap-2">
                       <Link
-                        href="/chat"
+                        href={`/chat?orderId=${order.order_id}`}
                         className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554]"
                       >
                         <MessageCircle className="h-3.5 w-3.5" />
@@ -418,7 +427,9 @@ export function LenderDashboardView({ userId }: { userId?: string } = {}) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {items.map((item) => {
-              const badge = getItemStatusBadge(item.status);
+              const badge = getItemStatusBadge(
+                item.status === 'available' && item.isRentedOut ? 'rented' : item.status,
+              );
 
               return (
                 <div

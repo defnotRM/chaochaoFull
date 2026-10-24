@@ -1,18 +1,17 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useEffect } from "react";
 import {
   ArrowLeft,
-  ArrowRight,
   BadgeCheck,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Info,
   Loader2,
   MapPin,
   MessageCircle,
@@ -24,14 +23,7 @@ import {
 
 import type { BookingDraft, BookingPageData, DateRange } from "./types";
 
-/* ────────────────────────────── ค่าคงที่ (UI rules) ──────────────────────────────
- * ค่าเหล่านี้เป็นกติกาฝั่ง UI ที่ยังไม่ผูกกับ schema — ปรับได้อิสระ
- */
-const LONG_RENTAL_MIN_DAYS = 3; // เช่า 3 วันขึ้นไปได้ส่วนลด
-const LONG_RENTAL_DISCOUNT_RATE = 0.1; // -10%
-const PLATFORM_FEE_RATE = 0; // ค่าธรรมเนียมแพลตฟอร์ม (ยังไม่กำหนดใน DB → 0)
-
-const DRAFT_STORAGE_KEY = "chaochao:bookingDraft";
+import RentalTermsModal from "./RentalTermsModal";
 
 const WEEKDAY_LABELS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
@@ -42,13 +34,33 @@ const thb = new Intl.NumberFormat("th-TH", {
 });
 
 const THAI_MONTHS_SHORT = [
-  "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
-  "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+  "ม.ค.",
+  "ก.พ.",
+  "มี.ค.",
+  "เม.ย.",
+  "พ.ค.",
+  "มิ.ย.",
+  "ก.ค.",
+  "ส.ค.",
+  "ก.ย.",
+  "ต.ค.",
+  "พ.ย.",
+  "ธ.ค.",
 ];
 
 const THAI_MONTHS_FULL = [
-  "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
-  "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+  "มกราคม",
+  "กุมภาพันธ์",
+  "มีนาคม",
+  "เมษายน",
+  "พฤษภาคม",
+  "มิถุนายน",
+  "กรกฎาคม",
+  "สิงหาคม",
+  "กันยายน",
+  "ตุลาคม",
+  "พฤศจิกายน",
+  "ธันวาคม",
 ];
 
 function formatKey(key: string | null | undefined): string {
@@ -195,24 +207,31 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
   }, [availability]);
 
   const [viewMonth, setViewMonth] = useState(initialMonth);
+  const [startKey, setStartKey] = useState<string | null>(null);
+  const [endKey, setEndKey] = useState<string | null>(null);
+  const meetupOptions = locations.filter(
+    (l) => l.locationType === "meetup" || l.locationType === "both",
+  );
+  const returnOptions = locations.filter(
+    (l) => l.locationType === "return" || l.locationType === "both",
+  );
 
-  // เมื่อเปิดหน้าหรือ initialMonth / item เปลี่ยน ให้ตั้ง viewMonth เป็น initialMonth ทันที
-  useEffect(() => {
+  const [pickupId, setPickupId] = useState<string | null>(
+    meetupOptions.length === 1 ? meetupOptions[0].id : null,
+  );
+  const [returnId, setReturnId] = useState<string | null>(
+    returnOptions.length === 1 ? returnOptions[0].id : null,
+  );
+  const [draft, setDraft] = useState<BookingDraft | null>(null);
+
+  const [prevItemId, setPrevItemId] = useState(item.id);
+  if (prevItemId !== item.id) {
+    setPrevItemId(item.id);
     setViewMonth(initialMonth);
     setStartKey(null);
     setEndKey(null);
     setDraft(null);
-  }, [initialMonth, item.id]);
-
-  const [startKey, setStartKey] = useState<string | null>(null);
-  const [endKey, setEndKey] = useState<string | null>(null);
-  const [pickupId, setPickupId] = useState<string | null>(
-    locations.length === 1 ? locations[0].id : null
-  );
-  const [returnId, setReturnId] = useState<string | null>(
-    locations.length === 1 ? locations[0].id : null
-  );
-  const [draft, setDraft] = useState<BookingDraft | null>(null);
+  }
 
   const viewYear = Math.floor(viewMonth / 12);
   const viewMonthIndex = viewMonth % 12;
@@ -280,17 +299,11 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
 
   /* ── pricing ── */
   const days = startKey && endKey ? inclusiveDays(startKey, endKey) : 0;
-  const rentalBase = days * item.rentalFeePerDay;
-  const discount =
-    days >= LONG_RENTAL_MIN_DAYS
-      ? Math.round(rentalBase * LONG_RENTAL_DISCOUNT_RATE)
-      : 0;
-  const rentalFee = rentalBase - discount;
-  const platformFee = Math.round(rentalFee * PLATFORM_FEE_RATE);
-  const netIncome = rentalFee - platformFee;
+  const rentalFee = days * item.rentalFeePerDay;
   const totalPayable = rentalFee + item.deposit;
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
@@ -313,10 +326,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
     loadUser();
   }, []);
 
-  const roles = currentUser?.roles || (currentUser?.role ? [currentUser.role] : []);
+  const roles =
+    currentUser?.roles || (currentUser?.role ? [currentUser.role] : []);
   const isLenderOnly =
     currentUser !== null &&
-    (roles.includes("lender") || roles.includes("ผู้ให้เช่า") || currentUser.role === "lender") &&
+    (roles.includes("lender") ||
+      roles.includes("ผู้ให้เช่า") ||
+      currentUser.role === "lender") &&
     !roles.includes("renter") &&
     !roles.includes("ผู้เช่า") &&
     !roles.includes("both") &&
@@ -324,7 +340,9 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
     !roles.includes("admin") &&
     !roles.includes("ผู้ดูแลระบบ");
 
-  const canContinue = Boolean(startKey && endKey && pickupId && returnId && !isLenderOnly);
+  const canContinue = Boolean(
+    startKey && endKey && pickupId && returnId && !isLenderOnly,
+  );
 
   async function handleSubmitBooking() {
     if (!canContinue || !startKey || !endKey) return;
@@ -338,8 +356,12 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
         itemId: item.id,
         startDate: startKey,
         endDate: endKey,
-        meetupLocation: pickup?.description || pickup?.fullAddress || "จุดนัดรับที่ตกลงกัน",
-        returnLocation: returnLoc?.description || returnLoc?.fullAddress || "จุดนัดคืนที่ตกลงกัน",
+        meetupLocation:
+          pickup?.description || pickup?.fullAddress || "จุดนัดรับที่ตกลงกัน",
+        returnLocation:
+          returnLoc?.description ||
+          returnLoc?.fullAddress ||
+          "จุดนัดคืนที่ตกลงกัน",
         rentalFee,
         deposit: item.deposit,
         totalPaid: totalPayable,
@@ -353,15 +375,23 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
 
       const result = await res.json();
       if (!res.ok) {
-        setSubmitError(result.message || "ส่งคำขอเช่าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+        setShowTermsModal(false);
+        setSubmitError(
+          result.message || "ส่งคำขอเช่าไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
+        );
         return;
       }
 
       // ส่งคำขอเช่าสำเร็จ นำผู้เช่าไปจัดการสถานะต่อใน Dashboard
-      const targetUserId = result.userId || "8a88d60a-e2cf-43a6-b4ea-baa9347bfee1";
-      router.push(`/dashboard/${targetUserId}/rent/${result.orderId}`);
+      const targetUserId = result.userId;
+      if (targetUserId) {
+        router.push(`/dashboard/${targetUserId}/rent/${result.orderId}`);
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err) {
       console.error("Submit booking error:", err);
+      setShowTermsModal(false)
       setSubmitError("เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์");
     } finally {
       setIsSubmitting(false);
@@ -383,10 +413,7 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
             หน้าแรก
           </Link>
           <span aria-hidden="true">/</span>
-          <Link
-            href="/products"
-            className="transition hover:text-[#1b3554]"
-          >
+          <Link href="/products" className="transition hover:text-[#1b3554]">
             สินค้าสำหรับเช่า
           </Link>
           <span aria-hidden="true">/</span>
@@ -442,7 +469,8 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                             >
                               <Clock3 className="h-3 w-3 text-sky-600" />
                               <span>
-                                ช่วงที่เปิดให้เช่า: {formatKey(r.start)} – {formatKey(r.end)}
+                                ช่วงที่เปิดให้เช่า: {formatKey(r.start)} –{" "}
+                                {formatKey(r.end)}
                               </span>
                             </span>
                           ))}
@@ -457,7 +485,8 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                             >
                               <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
                               <span>
-                                มีคนจองแล้ว: {formatKey(b.start)} – {formatKey(b.end)}
+                                มีคนจองแล้ว: {formatKey(b.start)} –{" "}
+                                {formatKey(b.end)}
                               </span>
                             </span>
                           ))}
@@ -508,15 +537,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                   const { key, day } = cell;
                   const booked = isBooked(key);
                   const open = isOpen(key);
-                  const selectable = open && !booked;
+                  const isPast = key < todayKey;
+                  const selectable = open && !booked && !isPast;
                   const isStart = key === startKey;
                   const isEnd = key === endKey;
                   const isEndpoint = isStart || isEnd;
                   const inRange =
-                    startKey &&
-                    endKey &&
-                    key > startKey &&
-                    key < endKey;
+                    startKey && endKey && key > startKey && key < endKey;
                   // ระหว่างเลือก: ไฮไลต์ start เดี่ยว ๆ ด้วย
                   const activeSingle = isStart && !endKey;
 
@@ -542,18 +569,14 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                       onClick={() => handleDayClick(key)}
                       aria-pressed={isEndpoint}
                       aria-label={`${formatKey(key)}${
-                        booked
-                          ? " ถูกจองแล้ว"
-                          : !open
-                          ? " นอกช่วงเปิดจอง"
-                          : ""
+                        booked ? " ถูกจองแล้ว" : !open ? " นอกช่วงเปิดจอง" : ""
                       }`}
                       title={
                         booked
                           ? `วันที่ ${formatKey(key)} ถูกจองแล้ว`
                           : !open
-                          ? `วันที่ ${formatKey(key)} อยู่นอกช่วงที่เปิดให้เช่า`
-                          : `วันที่ ${formatKey(key)} ว่าง (สามารถเลือกได้)`
+                            ? `วันที่ ${formatKey(key)} อยู่นอกช่วงที่เปิดให้เช่า`
+                            : `วันที่ ${formatKey(key)} ว่าง (สามารถเลือกได้)`
                       }
                       className={`flex aspect-square items-center justify-center rounded-lg text-sm transition ${cls} ${
                         selectable ? "cursor-pointer" : "cursor-not-allowed"
@@ -569,7 +592,10 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
               <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 border-t border-slate-100 pt-4 text-xs text-slate-500">
                 <LegendDot className="bg-[#1b3554]" label="วันที่เลือก" />
                 <LegendDot className="bg-[#c0e6fd]/70" label="ในช่วงเช่า" />
-                <LegendDot className="bg-white ring-1 ring-slate-200" label="ว่าง" />
+                <LegendDot
+                  className="bg-white ring-1 ring-slate-200"
+                  label="ว่าง"
+                />
                 <LegendDot className="bg-rose-100" label="ถูกจองแล้ว" />
                 <LegendDot className="bg-slate-100" label="นอกช่วงเปิดจอง" />
               </div>
@@ -579,17 +605,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                   <CalendarDays className="h-4 w-4 shrink-0" />
                   {endKey ? (
                     <span>
-                      เลือก{" "}
-                      <strong>{formatKey(startKey)}</strong>{" "}
-                      ถึง{" "}
-                      <strong>{formatKey(endKey)}</strong> (
-                      {days} วัน)
+                      เลือก <strong>{formatKey(startKey)}</strong> ถึง{" "}
+                      <strong>{formatKey(endKey)}</strong> ({days} วัน)
                     </span>
                   ) : (
                     <span>
-                      เริ่ม{" "}
-                      <strong>{formatKey(startKey)}</strong>{" "}
-                      — เลือกวันสิ้นสุดอีกครั้ง
+                      เริ่ม <strong>{formatKey(startKey)}</strong> —
+                      เลือกวันสิ้นสุดอีกครั้ง
                     </span>
                   )}
                 </div>
@@ -610,7 +632,7 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
               <div className="grid gap-6 sm:grid-cols-2">
                 <LocationPicker
                   title="จุดรับของ"
-                  locations={locations}
+                  locations={meetupOptions}
                   selectedId={pickupId}
                   onSelect={(id) => {
                     setPickupId(id);
@@ -619,7 +641,7 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                 />
                 <LocationPicker
                   title="จุดคืนของ"
-                  locations={locations}
+                  locations={returnOptions}
                   selectedId={returnId}
                   onSelect={(id) => {
                     setReturnId(id);
@@ -655,13 +677,8 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                 <div className="flex items-start gap-2.5">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                   <span>
-                    ถ่ายรูปหลักฐานสภาพอุปกรณ์ร่วมกันทั้งตอนรับและคืน เพื่อความปลอดภัยทั้งสองฝ่าย
-                  </span>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
-                  <span>
-                    เช่าตั้งแต่ 3 วันขึ้นไป รับส่วนลดทันที 10% จากค่าเช่าปกติ
+                    ถ่ายรูปหลักฐานสภาพอุปกรณ์ร่วมกันทั้งตอนรับและคืน
+                    เพื่อความปลอดภัยทั้งสองฝ่าย
                   </span>
                 </div>
               </div>
@@ -675,10 +692,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
                 <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100">
                   {item.imageUrl ? (
-                    <img
+                    <Image
                       src={item.imageUrl}
                       alt={item.name}
-                      className="h-full w-full object-cover"
+                      fill
+                      sizes="56px"
+                      className="object-cover"
+                      unoptimized={item.imageUrl.startsWith("data:") || item.imageUrl.startsWith("blob:")}
                     />
                   ) : (
                     <Package className="h-7 w-7 text-slate-400" />
@@ -697,10 +717,13 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
               {/* ข้อมูลผู้ให้เช่า */}
               <div className="mt-4 flex items-center gap-2.5 rounded-2xl bg-slate-50 p-3">
                 {owner.avatarUrl ? (
-                  <img
+                  <Image
                     src={owner.avatarUrl}
                     alt={owner.displayName}
+                    width={36}
+                    height={36}
                     className="h-9 w-9 shrink-0 rounded-full object-cover shadow-sm"
+                    unoptimized={owner.avatarUrl.startsWith("data:") || owner.avatarUrl.startsWith("blob:")}
                   />
                 ) : (
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-xs font-bold text-white">
@@ -737,15 +760,8 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                   <dl className="space-y-2.5">
                     <PriceRow
                       label={`ค่าเช่า (${days} วัน × ${thb.format(item.rentalFeePerDay)})`}
-                      value={thb.format(rentalBase)}
+                      value={thb.format(rentalFee)}
                     />
-                    {discount > 0 && (
-                      <PriceRow
-                        label="ส่วนลดเช่าระยะยาว (-10%)"
-                        value={`-${thb.format(discount)}`}
-                        highlight
-                      />
-                    )}
                     <PriceRow
                       label="เงินประกัน (คืนเมื่อเสร็จสิ้น)"
                       value={thb.format(item.deposit)}
@@ -762,7 +778,8 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                         </dd>
                       </div>
                       <p className="mt-1 text-right text-[11px] text-slate-400">
-                        (ค่าเช่าสุทธิ {thb.format(rentalFee)} + เงินประกัน {thb.format(item.deposit)})
+                        (ค่าเช่าสุทธิ {thb.format(rentalFee)} + เงินประกัน{" "}
+                        {thb.format(item.deposit)})
                       </p>
                     </div>
                   </dl>
@@ -786,14 +803,15 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                   </button>
                   <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center text-xs text-amber-800">
                     <p className="font-medium">
-                      บัญชีของคุณเป็นผู้ให้เช่าเท่านั้น หากต้องการเช่าอุปกรณ์ กรุณาเพิ่มบทบาทผู้เช่าหรือสลับบัญชี
+                      บัญชีของคุณเป็นผู้ให้เช่าเท่านั้น หากต้องการเช่าอุปกรณ์
+                      กรุณาเพิ่มบทบาทผู้เช่าหรือสลับบัญชี
                     </p>
                   </div>
                 </div>
               ) : (
                 <button
                   type="button"
-                  onClick={handleSubmitBooking}
+                  onClick={() => setShowTermsModal(true)}
                   disabled={!canContinue || isSubmitting}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#1b3554] to-[#3f6593] px-5 py-3.5 text-base font-semibold text-white shadow-md shadow-[#1b3554]/15 transition duration-200 hover:from-[#000f22] hover:to-[#1b3554] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
                 >
@@ -802,7 +820,9 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
                   ) : (
                     <Send className="h-5 w-5" />
                   )}
-                  <span>{isSubmitting ? "กำลังส่งคำขอเช่า..." : "ส่งคำขอเช่า"}</span>
+                  <span>
+                    {isSubmitting ? "กำลังส่งคำขอเช่า..." : "ส่งคำขอเช่า"}
+                  </span>
                 </button>
               )}
 
@@ -832,6 +852,12 @@ export default function BookingClient({ data }: { data: BookingPageData }) {
           </aside>
         </div>
       </div>
+      <RentalTermsModal
+        open={showTermsModal}
+        submitting={isSubmitting}
+        onCancel={() => setShowTermsModal(false)}
+        onConfirm={handleSubmitBooking}
+      />
     </div>
   );
 }

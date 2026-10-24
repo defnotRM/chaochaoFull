@@ -22,6 +22,13 @@ export const registerSchema = z.object({
   role: z.enum(["lender", "renter", "both"], {
     message: "กรุณาเลือกประเภทผู้ใช้งาน",
   }),
+
+  avatarImageUrl: z.string().optional(),
+  idCardImageUrl: z.string().optional(),
+  idCardSelfieImageUrl: z.string().optional(),
+  bankName: z.string().optional(),
+  accountNumber: z.string().optional(),
+  accountName: z.string().optional(),
 });
 
 export type RegisterFormData = z.infer<typeof registerSchema>;

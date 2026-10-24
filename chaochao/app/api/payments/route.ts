@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { uploadToStorage } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +47,10 @@ export async function POST(request: Request) {
             { status: 400 }
           );
         }
-        const buffer = Buffer.from(await slip.arrayBuffer());
-        const mimeType = slip.type || "image/png";
-        slipDataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
+        const uploadRes = await uploadToStorage("slips", orderId, slip, {
+          contentType: slip.type || "image/png",
+        });
+        slipDataUri = uploadRes.publicUrl;
       }
     }
 
@@ -57,6 +59,11 @@ export async function POST(request: Request) {
         { message: "กรุณาระบุเลขออเดอร์" },
         { status: 400 }
       );
+    }
+
+    if (slipDataUri && slipDataUri.startsWith("data:")) {
+      const uploadRes = await uploadToStorage("slips", orderId, slipDataUri);
+      slipDataUri = uploadRes.publicUrl;
     }
 
     const admin = createAdminClient();
@@ -126,7 +133,11 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { paymentId: payment.payment_id, message: "อัปโหลดสลิปเรียบร้อยแล้ว รอผู้ให้เช่าตรวจสอบ" },
+      {
+        paymentId: payment.payment_id,
+        slipUrl: slipDataUri,
+        message: "อัปโหลดสลิปเรียบร้อยแล้ว รอผู้ให้เช่าตรวจสอบ",
+      },
       { status: 201 }
     );
   } catch (error) {

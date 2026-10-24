@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { uploadToStorage } from "@/lib/storage";
 
 const ALLOWED_TYPES = [
   "image/jpeg",
@@ -49,13 +50,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Convert file to Base64 Data URI for storage in useraccount table
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const mimeType = file.type || "image/jpeg";
-    const base64DataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
-
     const admin = createAdminClient();
+    const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const uploadResult = await uploadToStorage("banners", user.id, file, {
+      fileName: `banner_${Date.now()}.${fileExt}`,
+      contentType: file.type || "image/jpeg",
+    });
+    const savedBannerUrl = uploadResult.publicUrl;
 
     // 1. Check if useraccount already exists for this user
     const { data: existingUser } = await admin
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
       const { error } = await admin
         .from("useraccount")
         .update({
-          banner_url: base64DataUri,
+          banner_url: savedBannerUrl,
           updated_at: new Date().toISOString(),
         })
         .eq("user_id", user.id);
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
           username: uName,
           email: uEmail,
           national_id: uNatId,
-          banner_url: base64DataUri,
+          banner_url: savedBannerUrl,
           status: "Active",
           updated_at: new Date().toISOString(),
         });
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: "อัปโหลดภาพแบนเนอร์สำเร็จ",
-      bannerUrl: base64DataUri,
+      bannerUrl: savedBannerUrl,
     });
   } catch (error) {
     console.error("Banner upload error:", error);

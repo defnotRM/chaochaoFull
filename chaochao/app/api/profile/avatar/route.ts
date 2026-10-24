@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { uploadToStorage } from "@/lib/storage";
 
 const ALLOWED_TYPES = [
   "image/jpeg",
@@ -50,13 +51,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Convert file to Base64 Data URI for storage in useraccount table only
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const mimeType = file.type || "image/png";
-    const base64DataUri = `data:${mimeType};base64,${buffer.toString("base64")}`;
-
     const admin = createAdminClient();
+    const fileExt = file.name.split(".").pop()?.toLowerCase() || "png";
+    const uploadResult = await uploadToStorage("avatars", user.id, file, {
+      fileName: `avatar_${Date.now()}.${fileExt}`,
+      contentType: file.type || "image/png",
+    });
+    const savedAvatarUrl = uploadResult.publicUrl;
 
     // 1. Check if useraccount already exists for this user
     const { data: existingUser } = await admin
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
       const { error } = await admin
         .from("useraccount")
         .update({
-          avatar_url: base64DataUri,
+          avatar_url: savedAvatarUrl,
           updated_at: new Date().toISOString(),
         })
         .eq("user_id", user.id);
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
           username: uName,
           email: uEmail,
           national_id: uNatId,
-          avatar_url: base64DataUri,
+          avatar_url: savedAvatarUrl,
           status: "Active",
           updated_at: new Date().toISOString(),
         });
@@ -102,11 +103,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. In auth.users metadata, only store the short URL to keep JWT session cookies small
-    const shortAvatarUrl = `/api/avatar?id=${user.id}`;
+    // 2. In auth.users metadata, store the direct public Supabase Storage URL
     const userMetadata = {
       ...(user.user_metadata || {}),
-      avatar_url: shortAvatarUrl,
+      avatar_url: savedAvatarUrl,
     };
 
     await admin.auth.admin.updateUserById(user.id, {
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: "อัปโหลดรูปโปรไฟล์สำเร็จ",
-      avatarUrl: base64DataUri,
+      avatarUrl: savedAvatarUrl,
     });
   } catch (error) {
     console.error("Avatar upload error:", error);

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { apiError, apiSuccess } from "@/lib/api-response";
+import { uploadToStorage } from "@/lib/storage";
 import {
   createProductSchema,
   listProductsQuerySchema,
@@ -125,6 +126,21 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient();
     const userId = user?.id || "b5041d3d-ba07-4230-96fa-3fbfb4411439";
 
+    const processedImages = await Promise.all(
+      (input.images || []).map(async (img, idx) => {
+        let finalUrl = img.imageUrl;
+        if (finalUrl && finalUrl.startsWith("data:")) {
+          const res = await uploadToStorage("items", userId, finalUrl);
+          finalUrl = res.publicUrl;
+        }
+        return {
+          image_url: finalUrl,
+          is_primary: img.isPrimary ?? (idx === 0),
+          sequence: img.sequence ?? idx,
+        };
+      })
+    );
+
     const { data: itemId, error } = await admin.rpc("create_item_listing", {
       p_user_id: userId,
       p_category_id: input.categoryId ?? null,
@@ -133,11 +149,7 @@ export async function POST(request: NextRequest) {
       p_original_price: input.originalPrice ?? null,
       p_rental_fee_per_day: input.rentalFeePerDay,
       p_deposit: input.deposit,
-      p_images: (input.images || []).map((img, idx) => ({
-        image_url: img.imageUrl,
-        is_primary: img.isPrimary ?? (idx === 0),
-        sequence: img.sequence ?? idx,
-      })),
+      p_images: processedImages,
       p_locations: (input.locations || []).map((loc) => ({
         description: loc.description || "จุดนัดรับที่ตกลงกัน",
         no: loc.no || "-",

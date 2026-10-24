@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,6 +19,7 @@ import {
   Sparkles,
   Tag,
   Trash2,
+  UploadCloud,
 } from "lucide-react";
 
 interface Category {
@@ -91,6 +92,60 @@ export default function EditProductClient({
       ? initialImgs
       : ["https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80"]
   );
+  const [newImageUrl, setNewImageUrl] = useState("");
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleAddImage(url: string) {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    if (!imageUrls.includes(trimmed)) {
+      setImageUrls([...imageUrls, trimmed]);
+    }
+    setNewImageUrl("");
+  }
+
+  function handleRemoveImage(index: number) {
+    if (imageUrls.length <= 1) {
+      alert("ต้องมีรูปภาพสินค้าอย่างน้อย 1 รูป");
+      return;
+    }
+    setImageUrls(imageUrls.filter((_, i) => i !== index));
+  }
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingImage(true);
+    setErrorMessage(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("category", "items");
+      formData.append("folderId", initialItem.item_id);
+      Array.from(files).forEach((f) => formData.append("files", f));
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "อัปโหลดรูปภาพไม่สำเร็จ");
+      }
+
+      if (data.urls && data.urls.length > 0) {
+        setImageUrls((prev) => [...prev, ...data.urls]);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ");
+    } finally {
+      setIsUploadingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   // Form states with initial values
   const [itemName, setItemName] = useState(initialItem.item_name || "");
@@ -422,11 +477,20 @@ export default function EditProductClient({
               <Camera className="h-5 w-5 text-sky-600" />
               <h2 className="text-lg font-bold text-slate-900">3. รูปภาพอุปกรณ์</h2>
             </div>
-            <span className="text-xs text-slate-400">ภาพตัวอย่างสินค้า</span>
+            <span className="text-xs text-slate-400">รูปภาพจะถูกจัดเก็บใน Supabase Storage โฟลเดอร์ items</span>
           </div>
 
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/webp"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
           <div className="flex flex-col sm:flex-row items-center gap-5">
-            {/* กล่องรูปภาพ Preview */}
+            {/* กล่องรูปภาพ Preview หลัก */}
             <div className="relative flex aspect-square w-48 sm:w-56 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-[#eaf0f6] shadow-sm overflow-hidden">
               {imageUrls[0] ? (
                 <img
@@ -435,7 +499,15 @@ export default function EditProductClient({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <Package className="h-20 w-20 text-[#a0b5ce]" strokeWidth={1.5} />
+                <div className="text-center p-4">
+                  <Package className="mx-auto h-16 w-16 text-[#a0b5ce]" strokeWidth={1.5} />
+                  <span className="mt-2 block text-xs text-slate-400">ยังไม่มีรูปภาพ</span>
+                </div>
+              )}
+              {imageUrls[0] && (
+                <span className="absolute bottom-2 left-2 rounded-lg bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                  รูปหลัก (Cover)
+                </span>
               )}
             </div>
 
@@ -443,23 +515,80 @@ export default function EditProductClient({
             <div className="flex flex-1 flex-col justify-center space-y-3 w-full">
               <button
                 type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                }}
-                className="group flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 p-7 text-center transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.99]"
+                disabled={isUploadingImage}
+                onClick={() => fileInputRef.current?.click()}
+                className="group flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/40 p-7 text-center transition hover:border-sky-400 hover:bg-sky-50/70 active:scale-[0.99] disabled:opacity-50"
               >
-                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm transition group-hover:scale-105">
-                  <Plus className="h-5 w-5 text-slate-600" />
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-sky-600 shadow-sm transition group-hover:scale-105">
+                  {isUploadingImage ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-5 w-5" />
+                  )}
                 </div>
-                <span className="mt-3 text-sm font-semibold text-slate-700">
-                  เพิ่มรูปภาพอุปกรณ์
+                <span className="mt-3 text-sm font-semibold text-slate-800">
+                  {isUploadingImage ? "กำลังอัปโหลดรูปภาพ..." : "คลิกเพื่ออัปโหลดรูปภาพอุปกรณ์"}
                 </span>
                 <span className="mt-1 text-xs text-slate-400">
-                  รองรับไฟล์ PNG, JPG หรือ WEBP (ขนาดไม่เกิน 5MB)
+                  รองรับไฟล์ PNG, JPG หรือ WEBP (จัดเก็บใน Supabase Storage)
                 </span>
               </button>
+
+              {/* ช่องกรอก URL เพิ่มเติม */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="url"
+                  value={newImageUrl}
+                  onChange={(e) => setNewImageUrl(e.target.value)}
+                  placeholder="หรือวางลิงก์รูปภาพ (URL)..."
+                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 transition focus:border-sky-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddImage(newImageUrl)}
+                  className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition"
+                >
+                  เพิ่มจากลิงก์
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* รายการรูปภาพทั้งหมดที่อัปโหลดแล้ว */}
+          {imageUrls.length > 0 && (
+            <div className="mt-5 border-t border-slate-100 pt-4">
+              <p className="text-xs font-bold text-slate-700 mb-2.5">
+                รูปภาพของสินค้านี้ ({imageUrls.length} รูป)
+              </p>
+              <div className="flex flex-wrap gap-3">
+                {imageUrls.map((url, index) => (
+                  <div
+                    key={index}
+                    className="group relative h-20 w-20 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden shadow-xs"
+                  >
+                    <img
+                      src={url}
+                      alt={`รูปที่ ${index + 1}`}
+                      className="h-full w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveImage(index)}
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-white opacity-0 transition group-hover:opacity-100 hover:bg-rose-700"
+                      title="ลบรูปภาพนี้"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                    {index === 0 && (
+                      <span className="absolute bottom-0 inset-x-0 bg-sky-600/90 py-0.5 text-center text-[9px] font-bold text-white">
+                        หลัก
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Section 4: สถานที่นัดรับและวันว่าง */}

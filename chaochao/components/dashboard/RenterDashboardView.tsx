@@ -7,14 +7,12 @@ import {
   Package,
   Clock,
   CheckCircle2,
-  AlertCircle,
-  CreditCard,
-  RotateCcw,
   MessageCircle,
   ChevronRight,
   Loader2,
   Calendar,
   Sparkles,
+  CreditCard,
 } from 'lucide-react';
 import { EmptyState } from '@/components/StateHandling';
 
@@ -89,7 +87,13 @@ export function RenterDashboardView({ userId }: { userId?: string } = {}) {
   );
 
   useEffect(() => {
-    loadData(false);
+    let cancelled = false;
+    const run = async () => {
+      if (!cancelled) {
+        await loadData(false);
+      }
+    };
+    void run();
 
     const supabase = createBrowserClient();
     const channel = supabase
@@ -107,6 +111,7 @@ export function RenterDashboardView({ userId }: { userId?: string } = {}) {
     }, 2000);
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
       clearInterval(interval);
     };
@@ -321,28 +326,8 @@ export function RenterDashboardView({ userId }: { userId?: string } = {}) {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {order.status === 'item_sent' && (
-                        <Link
-                          href={`/renter/myproductsList/${order.order_id}/return`}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:from-emerald-700 hover:to-teal-800 active:scale-95"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          <span>ดำเนินการคืนสินค้า</span>
-                        </Link>
-                      )}
-
-                      {order.status === 'awaiting_payment' && (
-                        <Link
-                          href={`/renter/myproductsList/${order.order_id}/payment`}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#1b3554] to-[#3f6593] px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:from-[#000f22] hover:to-[#1b3554] active:scale-95"
-                        >
-                          <CreditCard className="h-3.5 w-3.5" />
-                          <span>ไปชำระเงิน</span>
-                        </Link>
-                      )}
-
                       <Link
-                        href="/chat"
+                        href={`/chat?orderId=${order.order_id}`}
                         className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554]"
                         title="แชทกับเจ้าของสินค้า"
                       >

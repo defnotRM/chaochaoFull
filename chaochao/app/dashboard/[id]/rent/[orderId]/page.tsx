@@ -25,8 +25,8 @@ export default async function UserRentalOrderDetailPage({
     notFound();
   }
 
-  // 2. ดึงข้อมูลสินค้า, รูปภาพสินค้า, เงื่อนไขสินค้า, และประวัติการชำระเงิน
-  const [itemRes, imageRes, condRes, paymentsRes] = await Promise.all([
+  // 2. ดึงข้อมูลสินค้า, รูปภาพสินค้า, เงื่อนไขสินค้า, ประวัติการชำระเงิน, และรูปหลักฐาน
+  const [itemRes, imageRes, condRes, paymentsRes, evidenceRes] = await Promise.all([
     admin
       .from("item")
       .select("item_name, rental_fee_per_day, deposit, user_id")
@@ -46,6 +46,11 @@ export default async function UserRentalOrderDetailPage({
       .from("payment")
       .select("payment_id, amount, status, slip_image_url, date")
       .eq("order_id", orderId),
+    admin
+      .from("rentalevidenceimage")
+      .select("evidence_id, evidence_type, image_url, created_at, uploaded_by")
+      .eq("order_id", orderId)
+      .order("created_at", { ascending: true }),
   ]);
 
   const item = itemRes.data;
@@ -128,6 +133,13 @@ export default async function UserRentalOrderDetailPage({
       status: p.status,
       slip_image_url: p.slip_image_url || null,
       date: p.date,
+    })),
+    evidence: (evidenceRes.data || []).map((e) => ({
+      evidence_id: e.evidence_id,
+      evidence_type: e.evidence_type,
+      image_url: e.image_url,
+      created_at: e.created_at,
+      uploaded_by: e.uploaded_by,
     })),
   };
 

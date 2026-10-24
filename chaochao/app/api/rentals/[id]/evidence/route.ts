@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { uploadEvidenceSchema } from "@/lib/validations/rental";
+import { uploadToStorage, StorageCategory } from "@/lib/storage";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,11 +33,26 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const { evidenceType, imageUrls, newStatus } = parsed.data;
 
+  const category: StorageCategory =
+    evidenceType.includes("before") || evidenceType.includes("handover")
+      ? "evidence/handover"
+      : "evidence/return";
+
+  const storageUrls: string[] = [];
+  for (const url of imageUrls) {
+    if (url.startsWith("data:")) {
+      const res = await uploadToStorage(category, id, url);
+      storageUrls.push(res.publicUrl);
+    } else {
+      storageUrls.push(url);
+    }
+  }
+
   const { error } = await supabase.rpc("upload_rental_evidence", {
     p_order_id: id,
     p_user_id: user.id,
     p_evidence_type: evidenceType,
-    p_image_urls: imageUrls,
+    p_image_urls: storageUrls,
     p_new_status: newStatus ?? null,
   });
 

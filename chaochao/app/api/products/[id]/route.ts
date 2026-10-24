@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { updateProductSchema } from "@/lib/validations/product";
+import { uploadToStorage } from "@/lib/storage";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -140,12 +141,21 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // 5) Update Images if provided
     if (input.images && input.images.length > 0) {
       await admin.from("itemimage").delete().eq("item_id", id);
-      const imageRows = input.images.map((img, idx) => ({
-        item_id: id,
-        image_url: typeof img === "string" ? img : img.imageUrl,
-        is_primary: idx === 0,
-        sequence: idx + 1,
-      }));
+      const imageRows = await Promise.all(
+        input.images.map(async (img, idx) => {
+          let url = typeof img === "string" ? img : img.imageUrl;
+          if (url && url.startsWith("data:")) {
+            const res = await uploadToStorage("items", id, url);
+            url = res.publicUrl;
+          }
+          return {
+            item_id: id,
+            image_url: url,
+            is_primary: idx === 0,
+            sequence: idx + 1,
+          };
+        })
+      );
       await admin.from("itemimage").insert(imageRows);
     }
 

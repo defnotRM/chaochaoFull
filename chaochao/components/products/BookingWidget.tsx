@@ -1,13 +1,15 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  AlertTriangle,
   BadgeCheck,
   CalendarDays,
   Heart,
   MessageCircle,
+  Pencil,
+  ShieldAlert,
   ShieldCheck,
   Star,
   User,
@@ -65,11 +67,19 @@ export default function BookingWidget({
     loadUser();
   }, []);
 
-  const roles = currentUser?.roles || (currentUser?.role ? [currentUser.role] : []);
+  const roles =
+    currentUser?.roles || (currentUser?.role ? [currentUser.role] : []);
   const isOwner = Boolean(currentUser?.id && currentUser.id === ownerId);
+  const isAdmin =
+    currentUser !== null &&
+    (roles.includes("admin") ||
+      roles.includes("ผู้ดูแลระบบ") ||
+      currentUser.role === "admin");
   const isLenderOnly =
     currentUser !== null &&
-    (roles.includes("lender") || roles.includes("ผู้ให้เช่า") || currentUser.role === "lender") &&
+    (roles.includes("lender") ||
+      roles.includes("ผู้ให้เช่า") ||
+      currentUser.role === "lender") &&
     !roles.includes("renter") &&
     !roles.includes("ผู้เช่า") &&
     !roles.includes("both") &&
@@ -101,7 +111,24 @@ export default function BookingWidget({
       </p>
 
       {/* ปุ่มหลัก → หน้าเลือกวันเช่า */}
-      {isOwner ? (
+      {isAdmin ? (
+        <div className="mt-4 space-y-2">
+          <button
+            type="button"
+            disabled
+            className="inline-flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-5 py-3.5 text-sm font-semibold text-slate-400 opacity-80 shadow-none"
+          >
+            <ShieldAlert className="h-5 w-5 text-rose-500" />
+            <span>ไม่สามารถเช่าได้ (บัญชีแอดมิน)</span>
+          </button>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-center text-xs text-rose-800">
+            <p className="font-medium">
+              คุณเข้าสู่ระบบด้วยบัญชีผู้ดูแลระบบ (Admin)
+              ซึ่งไม่สามารถทำรายการเช่าอุปกรณ์ได้
+            </p>
+          </div>
+        </div>
+      ) : isOwner ? (
         <div className="mt-4 space-y-2">
           <button
             type="button"
@@ -131,7 +158,8 @@ export default function BookingWidget({
           </button>
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-center text-xs text-amber-800">
             <p className="font-medium">
-              บัญชีของคุณเป็นผู้ให้เช่าเท่านั้น หากต้องการเช่าอุปกรณ์ กรุณาเพิ่มบทบาทผู้เช่าหรือสลับบัญชี
+              บัญชีของคุณเป็นผู้ให้เช่าเท่านั้น หากต้องการเช่าอุปกรณ์
+              กรุณาเพิ่มบทบาทผู้เช่าหรือสลับบัญชี
             </p>
           </div>
         </div>
@@ -153,10 +181,13 @@ export default function BookingWidget({
       {/* การ์ดผู้ปล่อยเช่า */}
       <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 p-3">
         {ownerAvatarUrl ? (
-          <img
+          <Image
             src={ownerAvatarUrl}
             alt={ownerName}
+            width={44}
+            height={44}
             className="h-11 w-11 shrink-0 rounded-full object-cover shadow-sm"
+            unoptimized={ownerAvatarUrl.startsWith("data:") || ownerAvatarUrl.startsWith("blob:")}
           />
         ) : (
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-[#1b3554] to-[#3f6593] text-base font-bold text-white">
@@ -194,29 +225,35 @@ export default function BookingWidget({
         </Link>
       </div>
 
-      {/* ปุ่มคู่: แชท / บันทึก */}
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      {/* เจ้าของประกาศ: แชท/บันทึกกับของตัวเองไม่มีความหมาย → แสดงปุ่มแก้ไขแทน */}
+      {isOwner ? (
         <Link
-          href={`/chat?userId=${ownerId}`}
-          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554] active:scale-95"
+          href={`/lender/editmyproduct/${productId}`}
+          className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554] active:scale-95"
         >
-          <MessageCircle className="h-4 w-4" />
-          แชท
+          <Pencil className="h-4 w-4" />
+          แก้ไขประกาศ
         </Link>
-        <button
-          type="button"
-          onClick={() => setSaved((v) => !v)}
-          aria-pressed={saved}
-          className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-95 ${
-            saved
-              ? "border-rose-200 bg-rose-50 text-rose-600"
-              : "border-slate-200 bg-white text-slate-700 hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554]"
-          }`}
-        >
-          <Heart className={`h-4 w-4 ${saved ? "fill-rose-500 text-rose-500" : ""}`} />
-          {saved ? "บันทึกแล้ว" : "บันทึก"}
-        </button>
-      </div>
+      ) : (
+        /* ปุ่มบันทึก */
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setSaved((v) => !v)}
+            aria-pressed={saved}
+            className={`inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-sm transition active:scale-95 ${
+              saved
+                ? "border-rose-200 bg-rose-50 text-rose-600"
+                : "border-slate-200 bg-white text-slate-700 hover:border-[#3f6593] hover:bg-sky-50 hover:text-[#1b3554]"
+            }`}
+          >
+            <Heart
+              className={`h-4 w-4 ${saved ? "fill-rose-500 text-rose-500" : ""}`}
+            />
+            {saved ? "บันทึกแล้ว" : "บันทึกสินค้า"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

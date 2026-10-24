@@ -16,6 +16,11 @@ import {
   Sparkles,
   Zap,
   CheckCircle2,
+  Upload,
+  Trash2,
+  Camera,
+  Landmark,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   registerSchema,
@@ -27,14 +32,103 @@ export default function RegisterForm() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [idCardPreview, setIdCardPreview] = useState<string | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
   });
+
+  const selectedRole = watch("role");
+  const isLenderRole = selectedRole === "lender" || selectedRole === "both";
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("กรุณาเลือกไฟล์รูปภาพที่ถูกต้อง (PNG, JPG, WEBP)");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert("ขนาดไฟล์ต้องไม่เกิน 5 MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setAvatarPreview(result);
+      setValue("avatarImageUrl", result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveAvatar = () => {
+    setAvatarPreview(null);
+    setValue("avatarImageUrl", undefined);
+  };
+
+  const handleIdCardFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("กรุณาเลือกไฟล์รูปภาพที่ถูกต้อง (PNG, JPG, WEBP)");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("ขนาดไฟล์ต้องไม่เกิน 10 MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setIdCardPreview(result);
+      setValue("idCardImageUrl", result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSelfieFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("กรุณาเลือกไฟล์รูปภาพที่ถูกต้อง (PNG, JPG, WEBP)");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("ขนาดไฟล์ต้องไม่เกิน 10 MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      setSelfiePreview(result);
+      setValue("idCardSelfieImageUrl", result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveIdCard = () => {
+    setIdCardPreview(null);
+    setValue("idCardImageUrl", undefined);
+  };
+
+  const handleRemoveSelfie = () => {
+    setSelfiePreview(null);
+    setValue("idCardSelfieImageUrl", undefined);
+  };
 
   const onSubmit = async (data: RegisterFormData) => {
     setServerError(null);
@@ -127,6 +221,56 @@ export default function RegisterForm() {
             className="space-y-5"
             noValidate
           >
+            {/* Avatar Upload (Optional) */}
+            <div className="flex flex-col items-center justify-center pb-1">
+              <div className="relative group">
+                <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-[#c0e6fd] bg-[#c0e6fd]/20 text-[#3f6593] shadow-sm transition hover:border-[#3f6593]">
+                  {avatarPreview ? (
+                    <img
+                      src={avatarPreview}
+                      alt="Avatar Preview"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Camera className="h-7 w-7 text-[#5b86b6]" />
+                  )}
+                </div>
+
+                <label
+                  htmlFor="register-avatar-input"
+                  className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/40 opacity-0 transition group-hover:opacity-100"
+                  title="เลือกรูปโปรไฟล์"
+                >
+                  <Camera className="h-5 w-5 text-white" />
+                </label>
+
+                <input
+                  id="register-avatar-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarFileChange}
+                  className="hidden"
+                />
+
+                {avatarPreview && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    className="absolute -top-1 -right-1 rounded-full bg-red-600 p-1 text-white shadow-sm hover:bg-red-700"
+                    title="ลบรูป"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              <label
+                htmlFor="register-avatar-input"
+                className="mt-2 cursor-pointer text-xs font-semibold text-[#3f6593] hover:underline"
+              >
+                {avatarPreview ? "เปลี่ยนรูปโปรไฟล์" : "+ รูปภาพโปรไฟล์ (ไม่บังคับ)"}
+              </label>
+            </div>
+
             {/* Username */}
             <div>
               <label
@@ -278,6 +422,182 @@ export default function RegisterForm() {
                 </p>
               )}
             </div>
+
+            {/* KYC Documents for Lenders */}
+            {isLenderRole && (
+              <div className="space-y-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-[#1b3554]" />
+                  <div>
+                    <h3 className="text-sm font-bold text-[#000f22]">
+                      เอกสารยืนยันตัวตนผู้ให้เช่า (KYC)
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      รูปภาพจะถูกจัดเก็บใน Supabase Storage โฟลเดอร์ KYC อย่างปลอดภัย
+                    </p>
+                  </div>
+                </div>
+
+                {/* 1. รูปบัตรประชาชน */}
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-[#1b3554]">
+                    1. ภาพถ่ายบัตรประชาชน (เห็นข้อมูลชัดเจน)
+                  </label>
+                  {idCardPreview ? (
+                    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
+                      <img
+                        src={idCardPreview}
+                        alt="ID Card Preview"
+                        className="h-32 w-full rounded-lg object-contain bg-slate-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRemoveIdCard}
+                        className="absolute right-3 top-3 rounded-lg bg-red-600/90 p-1.5 text-white shadow-sm transition hover:bg-red-700"
+                        title="ลบรูป"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="id-card-input"
+                      className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#c0e6fd] bg-white/80 py-4 transition hover:border-[#3f6593] hover:bg-white"
+                    >
+                      <Upload className="h-6 w-6 text-[#5b86b6]" />
+                      <span className="mt-1 text-xs font-medium text-[#3f6593]">
+                        คลิกเพื่ออัปโหลดภาพบัตรประชาชน
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        PNG, JPG หรือ WEBP (ไม่เกิน 10MB)
+                      </span>
+                      <input
+                        id="id-card-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleIdCardFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 2. รูปเซลฟี่คู่กับบัตรประชาชน */}
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-[#1b3554]">
+                    2. ภาพถ่ายเซลฟี่คู่กับบัตรประชาชน
+                  </label>
+                  {selfiePreview ? (
+                    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
+                      <img
+                        src={selfiePreview}
+                        alt="Selfie Preview"
+                        className="h-32 w-full rounded-lg object-contain bg-slate-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRemoveSelfie}
+                        className="absolute right-3 top-3 rounded-lg bg-red-600/90 p-1.5 text-white shadow-sm transition hover:bg-red-700"
+                        title="ลบรูป"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="selfie-input"
+                      className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#c0e6fd] bg-white/80 py-4 transition hover:border-[#3f6593] hover:bg-white"
+                    >
+                      <Camera className="h-6 w-6 text-[#5b86b6]" />
+                      <span className="mt-1 text-xs font-medium text-[#3f6593]">
+                        คลิกเพื่ออัปโหลดรูปเซลฟี่คู่กับบัตร
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        PNG, JPG หรือ WEBP (ไม่เกิน 10MB)
+                      </span>
+                      <input
+                        id="selfie-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleSelfieFileChange}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* 3. ข้อมูลบัญชีธนาคารสำหรับรับเงินโอนค่าเช่า */}
+                <div className="pt-3 border-t border-sky-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Landmark className="h-4 w-4 text-[#1b3554]" />
+                    <div>
+                      <h4 className="text-xs font-bold text-[#000f22]">
+                        3. บัญชีธนาคาร (สำหรับรับเงินโอนค่าเช่า)
+                      </h4>
+                      <p className="text-[10px] text-slate-500">
+                        รายได้จากการปล่อยเช่าจะถูกโอนเข้าบัญชีนี้
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {/* Bank Name */}
+                    <div>
+                      <label htmlFor="bankName" className="mb-1 block text-xs font-semibold text-[#1b3554]">
+                        ธนาคาร
+                      </label>
+                      <select
+                        id="bankName"
+                        {...register("bankName")}
+                        className="w-full rounded-xl border-2 border-[#c0e6fd] bg-white py-2.5 px-3 text-xs text-[#000f22] outline-none transition focus:border-[#3f6593] focus:ring-2 focus:ring-[#c0e6fd]/50"
+                      >
+                        <option value="">-- เลือกธนาคาร --</option>
+                        <option value="กสิกรไทย">ธนาคารกสิกรไทย (KBANK)</option>
+                        <option value="ไทยพาณิชย์">ธนาคารไทยพาณิชย์ (SCB)</option>
+                        <option value="กรุงเทพ">ธนาคารกรุงเทพ (BBL)</option>
+                        <option value="กรุงไทย">ธนาคารกรุงไทย (KTB)</option>
+                        <option value="กรุงศรีอยุธยา">ธนาคารกรุงศรีอยุธยา (BAY)</option>
+                        <option value="ทหารไทยธนชาต">ธนาคารทหารไทยธนชาต (TTB)</option>
+                        <option value="ออมสิน">ธนาคารออมสิน (GSB)</option>
+                        <option value="ธ.ก.ส.">ธนาคารเพื่อการเกษตรและสหกรณ์การเกษตร (ธ.ก.ส.)</option>
+                        <option value="ยูโอบี">ธนาคารยูโอบี (UOB)</option>
+                        <option value="อื่นๆ">ธนาคารอื่นๆ</option>
+                      </select>
+                    </div>
+
+                    {/* Account Number */}
+                    <div>
+                      <label htmlFor="accountNumber" className="mb-1 block text-xs font-semibold text-[#1b3554]">
+                        เลขที่บัญชี
+                      </label>
+                      <input
+                        id="accountNumber"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={15}
+                        placeholder="กรอกเลขที่บัญชีธนาคาร (เฉพาะตัวเลข เช่น 1234567890)"
+                        {...register("accountNumber")}
+                        className="w-full rounded-xl border-2 border-[#c0e6fd] bg-white py-2.5 px-3 text-xs text-[#000f22] outline-none transition placeholder:text-[#80aad3] focus:border-[#3f6593] focus:ring-2 focus:ring-[#c0e6fd]/50"
+                      />
+                    </div>
+
+                    {/* Account Name */}
+                    <div>
+                      <label htmlFor="accountName" className="mb-1 block text-xs font-semibold text-[#1b3554]">
+                        ชื่อบัญชี (ตรงตามสมุดบัญชี)
+                      </label>
+                      <input
+                        id="accountName"
+                        type="text"
+                        placeholder="เช่น นาย สมชาย ใจดี"
+                        {...register("accountName")}
+                        className="w-full rounded-xl border-2 border-[#c0e6fd] bg-white py-2.5 px-3 text-xs text-[#000f22] outline-none transition placeholder:text-[#80aad3] focus:border-[#3f6593] focus:ring-2 focus:ring-[#c0e6fd]/50"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Submit */}
             <button

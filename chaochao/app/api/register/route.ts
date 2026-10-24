@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { registerSchema } from "@/lib/validations/register";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { uploadToStorage } from "@/lib/storage";
 
 export async function POST(request: Request) {
   try {
@@ -74,6 +75,44 @@ export async function POST(request: Request) {
 
     const userId = authData.user.id;
 
+    // 4.1 Process Avatar and KYC image uploads if provided
+    let finalAvatarUrl: string | null = null;
+    let finalIdCardUrl: string | null = null;
+    let finalSelfieUrl: string | null = null;
+
+    if (body.avatarImageUrl) {
+      try {
+        const res = await uploadToStorage("avatars", userId, body.avatarImageUrl, {
+          fileName: `avatar_${Date.now()}.png`,
+        });
+        finalAvatarUrl = res.publicUrl;
+      } catch (err) {
+        console.warn("Error uploading avatarImageUrl during registration:", err);
+      }
+    }
+
+    if (body.idCardImageUrl) {
+      try {
+        const res = await uploadToStorage("kyc", userId, body.idCardImageUrl, {
+          fileName: `id_card_${Date.now()}.png`,
+        });
+        finalIdCardUrl = res.publicUrl;
+      } catch (err) {
+        console.warn("Error uploading idCardImageUrl during registration:", err);
+      }
+    }
+
+    if (body.idCardSelfieImageUrl) {
+      try {
+        const res = await uploadToStorage("kyc", userId, body.idCardSelfieImageUrl, {
+          fileName: `selfie_${Date.now()}.png`,
+        });
+        finalSelfieUrl = res.publicUrl;
+      } catch (err) {
+        console.warn("Error uploading idCardSelfieImageUrl during registration:", err);
+      }
+    }
+
     // 5. Ensure profile exists and is active in public.useraccount
     await admin
       .from("useraccount")
@@ -83,10 +122,23 @@ export async function POST(request: Request) {
           username: username.trim(),
           email,
           national_id: nationalId,
+          avatar_url: finalAvatarUrl,
+          id_card_url: finalIdCardUrl,
+          id_card_selfie_url: finalSelfieUrl,
+          identity_verification_status: (finalIdCardUrl && finalSelfieUrl) ? "pending" : "unverified",
           status: "Active",
         },
         { onConflict: "user_id" }
       );
+
+    if (finalAvatarUrl) {
+      await admin.auth.admin.updateUserById(userId, {
+        user_metadata: {
+          ...(authData.user.user_metadata || {}),
+          avatar_url: finalAvatarUrl,
+        },
+      });
+    }
 
     // 6. Assign roles in public.user_role_assignment
     const rolesToAssign =
@@ -107,6 +159,24 @@ export async function POST(request: Request) {
             { user_id: userId, role_id: r.role_id },
             { onConflict: "user_id,role_id" }
           );
+      }
+    }
+
+    // 7. Save bank account if provided (for lenders)
+    if (body.bankName && body.accountNumber && body.accountName) {
+      try {
+        await admin.from("bankaccount").upsert(
+          {
+            user_id: userId,
+            bank_name: String(body.bankName).trim(),
+            account_number: String(body.accountNumber).trim(),
+            account_name: String(body.accountName).trim(),
+            verification_status: "pending",
+          },
+          { onConflict: "user_id,account_number" }
+        );
+      } catch (bankErr) {
+        console.warn("Error inserting bank account during registration:", bankErr);
       }
     }
 
