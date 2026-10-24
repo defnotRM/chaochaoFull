@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import AdminSimulatedClock from "@/components/admin/AdminSimulatedClock";
 import {
   GitBranch,
   ShieldAlert,
@@ -256,7 +257,11 @@ export default function AdminWorkflowPage() {
     }
   };
 
-  const systemConfigList = configs.filter((c) => c.config_key !== "workflow_mode");
+  const systemConfigList = configs.filter(
+    (c) =>
+      c.config_key !== "workflow_mode" &&
+      c.config_key !== "simulated_offset_seconds",
+  );
 
   return (
     <div className="space-y-8">
@@ -298,6 +303,11 @@ export default function AdminWorkflowPage() {
           <span>รีเฟรชข้อมูล</span>
         </button>
       </div>
+
+      {/* ============================================================ */}
+      {/* ส่วนที่ 0: นาฬิกา & ปฏิทินจำลองเวลาของระบบ (Time Simulator) */}
+      {/* ============================================================ */}
+      <AdminSimulatedClock onClockChanged={loadAll} />
 
       {/* ============================================================ */}
       {/* ส่วนที่ 1: สวิตช์โหมด WORKFLOW (Workflow Mode Switcher) */}
