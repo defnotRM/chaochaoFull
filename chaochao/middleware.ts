@@ -60,11 +60,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/admin/login", request.url));
   }
 
-  // 3. ป้องกันหน้า / และ /users สำหรับผู้ใช้ทั่วไปที่ยังไม่ได้ล็อกอิน
-  const isProtected =
-    pathname === "/" ||
-    pathname === "/users" ||
-    pathname.startsWith("/users/");
+  // 3. ป้องกันหน้า / สำหรับผู้ใช้ทั่วไปที่ยังไม่ได้ล็อกอิน
+  const isProtected = pathname === "/";
 
   if (isProtected && !user) {
     const loginUrl = new URL("/login", request.url);
