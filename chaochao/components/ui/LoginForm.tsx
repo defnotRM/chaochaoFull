@@ -121,6 +121,16 @@ export default function LoginForm() {
             </div>
           </div>
 
+          {/* Suspended Account Banner */}
+          {searchParams.get("error") === "suspended" && !serverError && (
+            <div className="mb-5 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+              <p className="text-sm font-medium text-rose-700">
+                บัญชีผู้ใช้งานนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ
+              </p>
+            </div>
+          )}
+
           {/* Server Error Banner */}
           {serverError && (
             <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3">

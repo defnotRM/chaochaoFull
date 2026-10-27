@@ -22,6 +22,26 @@ export async function GET() {
       .eq("user_id", user.id)
       .maybeSingle();
 
+    if (
+      profile &&
+      (profile.status === "Suspended" ||
+        profile.status === "Banned" ||
+        profile.status === "Deactivated")
+    ) {
+      await supabase.auth.signOut();
+      return NextResponse.json(
+        {
+          user: null,
+          status: profile.status,
+          message:
+            profile.status === "Deactivated"
+              ? "บัญชีผู้ใช้นี้ถูกยุติการใช้งานแล้ว"
+              : `บัญชีผู้ใช้ถูกระงับการใช้งาน (${profile.status}) กรุณาติดต่อผู้ดูแลระบบ`,
+        },
+        { status: 403 }
+      );
+    }
+
     if (!profile) {
       const uName = user.user_metadata?.username || user.email?.split("@")[0] || "ผู้ใช้งาน";
       const uEmail = user.email || `${uName}@chaochao.local`;

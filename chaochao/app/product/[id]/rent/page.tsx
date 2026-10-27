@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { BOOKING_BLOCKING_STATUSES } from "@/lib/booking-statuses";
+import { getSimulatedTimeInfo } from "@/lib/simulated-time";
 import { createAdminClient } from "@/lib/supabase/admin";
 import BookingClient from "./BookingClient";
 import type { BookingLocation, BookingPageData, DateRange } from "./types";
@@ -58,6 +59,7 @@ export default async function ProductRentPage({
     ordersRes,
     reviewRes,
     ownerItemsRes,
+    simulatedTimeInfo,
   ] = await Promise.all([
     admin
       .from("useraccount")
@@ -95,6 +97,7 @@ export default async function ProductRentPage({
       .eq("order.item_id", id),
     // สินค้าทั้งหมดของผู้ให้เช่าสำหรับ aggregate เรตติ้ง
     admin.from("item").select("item_id").eq("user_id", item.user_id),
+    getSimulatedTimeInfo(admin),
   ]);
 
   let owner = ownerRes.data;
@@ -218,5 +221,5 @@ export default async function ProductRentPage({
     rating,
   };
 
-  return <BookingClient key={item.item_id} data={data} />;
+  return <BookingClient key={item.item_id} data={data} initialSimulatedTime={simulatedTimeInfo.simulatedNowIso} />;
 }

@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { RotateCcw } from "lucide-react";
 
-import type {
-  ProductCategoryOption,
-  ProductFilterState,
+import {
+  getTodayInBangkok,
+  type ProductCategoryOption,
+  type ProductFilterState,
 } from "./productCatalogLogic";
 
 type ProductFiltersProps = {
@@ -10,6 +12,7 @@ type ProductFiltersProps = {
   filters: ProductFilterState;
   invalidPriceRange: boolean;
   invalidDateRange: boolean;
+  invalidPastDate: boolean;
   onChange: (patch: Partial<ProductFilterState>) => void;
   onToggleCategory: (categoryId: string) => void;
   onReset: () => void;
@@ -20,10 +23,42 @@ export default function ProductFilters({
   filters,
   invalidPriceRange,
   invalidDateRange,
+  invalidPastDate,
   onChange,
   onToggleCategory,
   onReset,
 }: ProductFiltersProps) {
+  const [today, setToday] = useState(() => getTodayInBangkok());
+
+  useEffect(() => {
+    let active = true;
+    async function loadSimulated() {
+      try {
+        const res = await fetch("/api/simulated-time", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          if (active && json.simulatedNowIso) {
+            const dateStr = new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Bangkok",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(new Date(json.simulatedNowIso));
+            setToday(dateStr);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSimulated();
+    const timer = setInterval(loadSimulated, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -112,9 +147,11 @@ export default function ProductFilters({
           className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
         >
           <option value={0}>ทุกคะแนน</option>
-          <option value={4.5}>4.5 ดาวขึ้นไป</option>
+          <option value={5}>5 ดาว</option>
           <option value={4}>4 ดาวขึ้นไป</option>
           <option value={3}>3 ดาวขึ้นไป</option>
+          <option value={2}>2 ดาวขึ้นไป</option>
+          <option value={1}>1 ดาวขึ้นไป</option>
         </select>
       </fieldset>
 
@@ -130,6 +167,7 @@ export default function ProductFilters({
             <input
               type="date"
               value={filters.startDate}
+              min={today}
               max={filters.endDate || undefined}
               onChange={(event) => onChange({ startDate: event.target.value })}
               className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
@@ -140,7 +178,11 @@ export default function ProductFilters({
             <input
               type="date"
               value={filters.endDate}
-              min={filters.startDate || undefined}
+              min={
+                filters.startDate && filters.startDate > today
+                  ? filters.startDate
+                  : today
+              }
               onChange={(event) => onChange({ endDate: event.target.value })}
               className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
             />
@@ -149,6 +191,11 @@ export default function ProductFilters({
         {invalidDateRange && (
           <p className="mt-2 text-xs text-rose-600">
             วันที่คืนต้องไม่อยู่ก่อนวันที่เริ่มเช่า
+          </p>
+        )}
+        {invalidPastDate && (
+          <p className="mt-2 text-xs text-rose-600">
+            เลือกวันที่ย้อนหลังไม่ได้ กรุณาเลือกตั้งแต่วันนี้เป็นต้นไป
           </p>
         )}
         <p className="mt-2 text-xs leading-relaxed text-slate-400">

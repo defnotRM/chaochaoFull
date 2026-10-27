@@ -71,7 +71,23 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 4. ถ้าล็อกอินแล้วและเข้ามาหน้า /login หรือ /register ให้ส่งไปหน้าแรก
+  // 4. ถ้าล็อกอินอยู่และไม่ใช่หน้า login/register: ตรวจสอบสถานะบัญชี ถ้าถูกระงับให้เตะออกทันที
+  if (user && !pathname.startsWith("/admin") && pathname !== "/login" && pathname !== "/register") {
+    const { data: profile } = await supabase
+      .from("useraccount")
+      .select("status")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (profile && (profile.status === "Suspended" || profile.status === "Banned")) {
+      await supabase.auth.signOut();
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("error", "suspended");
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // 5. ถ้าล็อกอินแล้วและเข้ามาหน้า /login หรือ /register ให้ส่งไปหน้าแรก
   if ((pathname === "/login" || pathname === "/register") && user) {
     return NextResponse.redirect(new URL("/", request.url));
   }

@@ -896,15 +896,18 @@ export default function AdminDisputesPage() {
                         onChange={() => {
                           setSelectedOutcome("false_advertisement_rejected");
                           setReportStatus("dismissed");
+                          setVerdictText(
+                            "ตรวจสอบหลักฐานแล้วพบว่าสินค้าตรงปกตามที่ระบุในรายการ คืนเงินประกัน 100% ให้แก่ผู้เช่า และโอนค่าเช่าหลังหักค่าธรรมเนียม 10% ให้แก่ผู้ให้เช่า"
+                          );
                         }}
                         className="mt-0.5 text-[#1b3554]"
                       />
                       <div className="text-xs">
                         <span className="font-bold text-slate-800 block">
-                          ปฏิเสธ: สินค้าตรงตามที่ระบุไว้
+                          ปฏิเสธ: สินค้าตรงตามที่ระบุไว้ (สินค้าตรงปก)
                         </span>
                         <span className="text-slate-500">
-                          ยกเลิกข้อพิพาท ดำเนินการต่อตามปกติ
+                          ยกเลิกข้อพิพาท คืนเงินประกัน 100% ให้ผู้เช่า และโอนค่าเช่าหักค่าธรรมเนียม 10% ให้ผู้ให้เช่า
                         </span>
                       </div>
                     </label>

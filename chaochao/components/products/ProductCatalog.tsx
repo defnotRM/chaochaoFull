@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Grid2X2, List, Search, SlidersHorizontal, X } from "lucide-react";
 
 import type { ItemCategoryRow, Product } from "@/lib/types/product";
@@ -12,6 +12,7 @@ import {
   createInitialProductFilters,
   filterProducts,
   sortProducts,
+  getTodayInBangkok,
   type CatalogSort,
   type ProductFilterState,
 } from "./productCatalogLogic";
@@ -20,6 +21,7 @@ type ProductCatalogProps = {
   itemCategories: ItemCategoryRow[];
   products: Product[];
   initialSearchQuery?: string;
+  initialCategoryIds?: string[];
 };
 
 type CatalogLayout = "grid" | "list";
@@ -28,17 +30,51 @@ export default function ProductCatalog({
   itemCategories,
   products,
   initialSearchQuery = "",
+  initialCategoryIds = [],
 }: ProductCatalogProps) {
   const [filters, setFilters] = useState(() =>
-    createInitialProductFilters(initialSearchQuery),
+    createInitialProductFilters(initialSearchQuery, initialCategoryIds),
   );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [layout, setLayout] = useState<CatalogLayout>("grid");
   const [sortBy, setSortBy] = useState<CatalogSort>("rating-desc");
 
-  const { criteria, invalidPriceRange, invalidDateRange } = useMemo(
-    () => createFilterCriteria(filters),
-    [filters],
+  const [simulatedDate, setSimulatedDate] = useState<string>(() =>
+    getTodayInBangkok(),
+  );
+
+  useEffect(() => {
+    let active = true;
+    async function loadSimulated() {
+      try {
+        const res = await fetch("/api/simulated-time", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          if (active && json.simulatedNowIso) {
+            const dateStr = new Intl.DateTimeFormat("en-CA", {
+              timeZone: "Asia/Bangkok",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(new Date(json.simulatedNowIso));
+            setSimulatedDate(dateStr);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadSimulated();
+    const timer = setInterval(loadSimulated, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const { criteria, invalidPriceRange, invalidDateRange, invalidPastDate } = useMemo(
+    () => createFilterCriteria(filters, simulatedDate),
+    [filters, simulatedDate],
   );
 
   const categories = useMemo(
@@ -52,8 +88,8 @@ export default function ProductCatalog({
   );
 
   const sortedProducts = useMemo(
-    () => sortProducts(filteredProducts, sortBy),
-    [filteredProducts, sortBy],
+    () => sortProducts(filteredProducts, sortBy, criteria.searchQuery),
+    [criteria.searchQuery, filteredProducts, sortBy],
   );
 
   function updateFilters(patch: Partial<ProductFilterState>) {
@@ -125,6 +161,7 @@ export default function ProductCatalog({
             filters={filters}
             invalidPriceRange={invalidPriceRange}
             invalidDateRange={invalidDateRange}
+            invalidPastDate={invalidPastDate}
             onChange={updateFilters}
             onToggleCategory={toggleCategory}
             onReset={resetFilters}

@@ -184,22 +184,40 @@ export async function POST(
     try {
       const notificationsToInsert = [];
 
+      const order = report.rentalorder;
+      const renterId = order?.user_id;
+      const lenderId = order?.item?.user_id;
+
+      const isFalseAdRejected =
+        outcome === "false_advertisement_rejected" ||
+        verdict.includes("สินค้าตรงปก");
+
+      const renterNoticeMsg = isFalseAdRejected
+        ? `คำตัดสิน: ${verdict.trim()} (รายละเอียด: ระบบได้คืนเงินประกัน 100% ให้แก่คุณ และโอนค่าเช่าหลังหักค่าธรรมเนียม 10% ให้แก่ผู้ให้เช่าเรียบร้อยแล้ว)`
+        : `คำตัดสิน: ${verdict.trim()}`;
+
+      const lenderNoticeMsg = isFalseAdRejected
+        ? `คำตัดสิน: ${verdict.trim()} (รายละเอียด: ระบบได้โอนเงินค่าเช่าหลังหักค่าธรรมเนียม 10% ให้แก่คุณ และคืนเงินประกันให้แก่ผู้เช่าเรียบร้อยแล้ว)`
+        : `คำตัดสิน: ${verdict.trim()}`;
+
       // แจ้งเตือนผู้รายงาน
       if (report.reporter_id) {
         notificationsToInsert.push({
           user_id: report.reporter_id,
           type: "dispute_resolved",
           title: "ข้อพิพาทได้รับการตัดสินแล้ว",
-          message: `คำตัดสิน: ${verdict.trim()}`,
+          message:
+            report.reporter_id === renterId
+              ? renterNoticeMsg
+              : report.reporter_id === lenderId
+              ? lenderNoticeMsg
+              : `คำตัดสิน: ${verdict.trim()}`,
           related_order_id: report.order_id || null,
         });
       }
 
       // แจ้งเตือนอีกฝ่าย (ถ้ามี)
-      const order = report.rentalorder;
       if (order) {
-        const renterId = order.user_id;
-        const lenderId = order.item?.user_id;
         const counterpartId =
           report.reporter_id === renterId ? lenderId : renterId;
 
@@ -208,7 +226,12 @@ export async function POST(
             user_id: counterpartId,
             type: "dispute_resolved",
             title: "ข้อพิพาทได้รับการตัดสินแล้ว",
-            message: `คำตัดสิน: ${verdict.trim()}`,
+            message:
+              counterpartId === renterId
+                ? renterNoticeMsg
+                : counterpartId === lenderId
+                ? lenderNoticeMsg
+                : `คำตัดสิน: ${verdict.trim()}`,
             related_order_id: report.order_id || null,
           });
         }
