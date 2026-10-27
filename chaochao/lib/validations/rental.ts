@@ -17,6 +17,7 @@ export type CreateRentalOrderInput = z.infer<typeof createRentalOrderSchema>;
 export const simpleStatusTransitions = [
   "awaiting_payment", // เจ้าของสินค้า approve คำขอ
   "rejected",          // เจ้าของสินค้า reject คำขอ
+  "rejected_by_lender", // เจ้าของสินค้า reject คำขอ
   "cancelled",          // ผู้เช่ายกเลิกก่อนจ่ายเงิน
 ] as const;
 
